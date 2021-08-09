@@ -14,6 +14,7 @@ for(const key in MessageTypeInstant){
 export const MessageTypeSpecial = {
   REQUEST: 'request',
   PARTICIPANT_LEFT: 'm_participant_left',       //  -> remove info
+  SET_PERIOD: 'set_period',
 }
 export const MessageTypeStore:{[name: string]: string} = {
   PARTICIPANT_POSE: 'mp',                       //  -> update presence once per 5 sec / message immediate value

@@ -14,9 +14,37 @@ export class ParticipantStore {
   socket:WebSocket
   storedMessages = new Map<string, Message>()   //  key=type
   messagesTo:Message[] = []                   //
+  interval:number|undefined = undefined
+  period = 100
+  setPeriod(period: number){
+    this.period = period
+    if (this.interval){ clearInterval(this.interval) }
+    this.interval = setInterval(()=>{
+      if (this.messagesTo.length){
+        try{
+          this.socket.send(JSON.stringify(this.messagesTo))
+        }
+        catch(e){
+          console.error(e)
+        }
+        this.messagesTo = []
+        //console.log(`${this.messagesTo.length} msg sent to ${this.id} v:${JSON.stringify(this.messagesTo)}`)
+      }      
+    }, this.period)
+  }
+  pushOrUpdateMessage(msg: Message){
+    const found = this.messagesTo.findIndex(m => m.t === msg.t)
+    if (found >= 0){
+      this.messagesTo[found] = msg  //  update
+    }else{
+      this.messagesTo.push(msg)     //  push
+    }
+  }
+  
   constructor(id:string, socket:WebSocket){
     this.id = id
     this.socket = socket
+    this.setPeriod(this.period)
   }
 }
 export class RoomStore {
@@ -34,7 +62,6 @@ export class RoomStore {
   }
 }
 
-
 class Rooms{
   rooms:Map<string, RoomStore> = new Map()
   get(name: string){
@@ -50,7 +77,8 @@ class Rooms{
     this.rooms = new Map()
   }
 }
-const rooms = new Rooms()
+const rooms = new Rooms();
+(window as any).rooms = rooms
 interface Socket{
   rid: string
   pid: string
@@ -62,7 +90,7 @@ async function handleWs(sock: WebSocket) {
     for await (const ev of sock) {
       if (typeof ev === "string") {
         // text message.
-        console.log("ws:", ev);
+        console.log('ws:', ev);
         const msg = JSON.parse(ev) as Message
         if (!msg.p || !msg.r || !msg.t){
           console.error(`Invalid message: ${ev}`)
@@ -74,10 +102,15 @@ async function handleWs(sock: WebSocket) {
           const msgArrays = Array.from(room.participants.values()).filter(remote => remote.id !== participant.id)
             .map(remote => Array.from(remote.storedMessages.values()))
           participant.messagesTo = participant.messagesTo.concat(...msgArrays)
+        }else if (msg.t === MessageTypeSpecial.SET_PERIOD){
+          const period = JSON.parse(msg.v)
+          if (period > 0){
+            participant.setPeriod(period)
+          }
         }else if (msg.t === MessageTypeSpecial.PARTICIPANT_LEFT){
           room.participants.delete(participant.id)
           sockets.delete(participant.socket)
-          console.log("Participant ${s.pid} left by message", ev);
+          console.log(`Participant ${participant.id} left by message: ${ev}`);
         }else{ 
           if (messageTypeStoreSet.has(msg.t)){  //  store message if needed
             participant.storedMessages.set(msg.t, msg)
@@ -86,11 +119,11 @@ async function handleWs(sock: WebSocket) {
           if (msg.d){
             const to = room.participants.get(msg.d)
             if (to){
-              to.messagesTo.push(msg)
+              to.pushOrUpdateMessage(msg)
             }
           }else{
             const remotes = Array.from(room.participants.values()).filter(remote => remote.id !== participant.id)
-            remotes.forEach(remote => remote.messagesTo.push(msg))
+            remotes.forEach(remote => remote.pushOrUpdateMessage(msg))
           }
         }
       } else if (ev instanceof Uint8Array) {
@@ -104,13 +137,11 @@ async function handleWs(sock: WebSocket) {
         // close.
         const s = sockets.get(sock)
         if (s){
-          console.log("Participant ${s.pid} left by websocket close", ev);
+          const { code, reason } = ev;
+          console.warn(`Participant ${s.pid} left by websocket close code. ${code}, reason ${reason}`);
           rooms.rooms.get(s.rid)?.participants.delete(s.pid)
           sockets.delete(sock)
-        }else{
-          console.error('Sock to close not found.')
         }
-        const { code, reason } = ev;
       }
     }
   } catch (err) {
@@ -121,17 +152,6 @@ async function handleWs(sock: WebSocket) {
     }
   }
 }
-setInterval(()=>{
-  rooms.rooms.forEach(room => {
-    room.participants.forEach(participant => {
-      if (participant.messagesTo.length){
-        participant.socket.send(JSON.stringify(participant.messagesTo))
-        console.log(`${participant.messagesTo.length} msg sent to ${participant.id} v:${JSON.stringify(participant.messagesTo)}`)
-        participant.messagesTo = []
-      }
-    })
-  })
-}, 100)
 
 if (import.meta.main) {
   /** websocket message relay server */
