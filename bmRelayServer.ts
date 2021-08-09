@@ -33,7 +33,7 @@ export class ParticipantStore {
     }, this.period)
   }
   pushOrUpdateMessage(msg: Message){
-    const found = this.messagesTo.findIndex(m => m.t === msg.t)
+    const found = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
     if (found >= 0){
       this.messagesTo[found] = msg  //  update
     }else{
