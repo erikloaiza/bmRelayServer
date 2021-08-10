@@ -167,7 +167,11 @@ async function handleWs(sock: WebSocket) {
   } catch (err) {
     console.error(`Failed to receive frame: ${err}`);
     if (!sock.isClosed) {
-      await sock.close(1000).catch(console.error);  //  code 1000 : Normal Closure
+      try{
+        sock.close(1000).catch(console.error)      //  code 1000 : Normal Closure
+      }catch(e){
+        console.error(e)
+      }
     }
   }
 }
