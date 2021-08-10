@@ -17,8 +17,16 @@ export class ParticipantStore {
   interval:number|undefined = undefined
   period = 100
   setPeriod(period: number){
-    this.period = period
-    if (this.interval){ clearInterval(this.interval) }
+    if (this.interval){
+      try{
+        clearInterval(this.interval)
+        this.interval = undefined
+      }
+      catch{
+        console.error(`Failed to clear interval ${this.interval} of pid ${this.id}.`)
+        this.interval = undefined
+      } 
+    }
     this.interval = setInterval(()=>{
       if (this.messagesTo.length){
         try{
@@ -30,7 +38,9 @@ export class ParticipantStore {
         this.messagesTo = []
         //console.log(`${this.messagesTo.length} msg sent to ${this.id} v:${JSON.stringify(this.messagesTo)}`)
       }      
-    }, this.period)
+    }, period)
+    console.log(`Set send period of ${period} for pid:${this.id}`)
+    this.period = period
   }
   pushOrUpdateMessage(msg: Message){
     const found = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
@@ -83,21 +93,19 @@ interface Socket{
   rid: string
   pid: string
 }
-const sockets:Map<WebSocket, Socket> = new Map()
 
 async function handleWs(sock: WebSocket) {
   try {
     for await (const ev of sock) {
       if (typeof ev === "string") {
         // text message.
-        console.log('ws:', ev);
+        //  console.log('ws:', ev);
         const msg = JSON.parse(ev) as Message
         if (!msg.p || !msg.r || !msg.t){
           console.error(`Invalid message: ${ev}`)
         }
         const room = rooms.get(msg.r)
         const participant = room.getParticipant(msg.p, sock)
-        sockets.set(sock, {rid: msg.r, pid: msg.p})
         if (msg.t === MessageTypeSpecial.REQUEST){
           const msgArrays = Array.from(room.participants.values()).filter(remote => remote.id !== participant.id)
             .map(remote => Array.from(remote.storedMessages.values()))
@@ -109,7 +117,6 @@ async function handleWs(sock: WebSocket) {
           }
         }else if (msg.t === MessageTypeSpecial.PARTICIPANT_LEFT){
           room.participants.delete(participant.id)
-          sockets.delete(participant.socket)
           console.log(`Participant ${participant.id} left by message: ${ev}`);
         }else{ 
           if (messageTypeStoreSet.has(msg.t)){  //  store message if needed
@@ -134,21 +141,25 @@ async function handleWs(sock: WebSocket) {
         // ping.
         console.log("ws:Ping", body);
       } else if (isWebSocketCloseEvent(ev)) {
-        // close.
-        const s = sockets.get(sock)
-        if (s){
-          const { code, reason } = ev;
-          console.warn(`Participant ${s.pid} left by websocket close code. ${code}, reason ${reason}`);
-          rooms.rooms.get(s.rid)?.participants.delete(s.pid)
-          sockets.delete(sock)
+        // onclose: close websocket
+        const { code, reason } = ev;
+        for(const room of rooms.rooms.values()){
+          for(const participant of room.participants.values()){
+            if (participant.socket === sock){
+              console.warn(`Participant ${participant.id} left by websocket close code:${code}, reason:${reason}.`);
+              room.participants.delete(participant.id)
+
+              return
+            }
+          }
         }
+        console.log(`websocket close. code:${code}, reason:${reason}`)
       }
     }
   } catch (err) {
-    console.error(`failed to receive frame: ${err}`);
-
+    console.error(`Failed to receive frame: ${err}`);
     if (!sock.isClosed) {
-      await sock.close(1000).catch(console.error);
+      await sock.close(1000).catch(console.error);  //  code 1000 : Normal Closure
     }
   }
 }
