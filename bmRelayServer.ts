@@ -14,33 +14,10 @@ export class ParticipantStore {
   socket:WebSocket
   storedMessages = new Map<string, Message>()   //  key=type
   messagesTo:Message[] = []                   //
-  interval:number|undefined = undefined
-  period = 100
+  period = 2
   setPeriod(period: number){
-    if (this.interval){
-      try{
-        clearInterval(this.interval)
-        this.interval = undefined
-      }
-      catch{
-        console.error(`Failed to clear interval ${this.interval} of pid ${this.id}.`)
-        this.interval = undefined
-      } 
-    }
-    this.interval = setInterval(()=>{
-      if (this.messagesTo.length){
-        try{
-          this.socket.send(JSON.stringify(this.messagesTo))
-        }
-        catch(e){
-          console.error(e)
-        }
-        this.messagesTo = []
-        //console.log(`${this.messagesTo.length} msg sent to ${this.id} v:${JSON.stringify(this.messagesTo)}`)
-      }      
-    }, period)
+    this.period = Math.round(period / 50)
     console.log(`Set send period of ${period} for pid:${this.id}`)
-    this.period = period
   }
   pushOrUpdateMessage(msg: Message){
     const found = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
@@ -48,6 +25,18 @@ export class ParticipantStore {
       this.messagesTo[found] = msg  //  update
     }else{
       this.messagesTo.push(msg)     //  push
+    }
+  }
+  sendMessages(){
+    if (this.messagesTo.length){
+      try{
+        this.socket.send(JSON.stringify(this.messagesTo))
+      }
+      catch(e){
+        console.error(e)
+      }
+      this.messagesTo = []
+      //console.log(`${this.messagesTo.length} msg sent to ${this.id} v:${JSON.stringify(this.messagesTo)}`)
     }
   }
   
@@ -74,6 +63,7 @@ export class RoomStore {
 
 class Rooms{
   rooms:Map<string, RoomStore> = new Map()
+  sendCount = 0;
   get(name: string){
     const found = this.rooms.get(name)
     if (found){
@@ -85,6 +75,24 @@ class Rooms{
   }
   clear(){
     this.rooms = new Map()
+  }
+  constructor(){
+    this.startSendInterval()
+  }
+  startSendInterval(){
+    setInterval(()=>{
+      for(const room of this.rooms.values()){
+        for(const participant of room.participants.values()){
+          if (this.sendCount % participant.period === 0){
+            participant.sendMessages()
+          }
+        }
+      }
+      this.sendCount ++
+      if (this.sendCount === 2*3*5*7*11*13*17*19*23){
+        this.sendCount = 0
+      }
+    }, 50)
   }
 }
 const rooms = new Rooms();
