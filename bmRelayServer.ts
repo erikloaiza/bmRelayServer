@@ -178,8 +178,11 @@ async function handleWs(sock: WebSocket) {
 
 if (import.meta.main) {
   /** websocket message relay server */
-  const port = Deno.args[0] || "8443";
-  const TLS = Deno.args[1] || false;
+  
+  const configText=Deno.readTextFileSync('./config.json')
+  const config=configText ? JSON.parse(configText) : undefined
+  const port = Deno.args[0] || config?.port || "8443";
+  const TLS = Deno.args[1] || config?.tls || false;
   console.log(`Websocket server is running on :${port}${TLS ? ' with TLS' : ''}.`);
   for await (const req of (
     TLS ? serveTLS({port:Number(port), certFile:'./host.crt', keyFile:'./host.key'}) 
