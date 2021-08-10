@@ -16,7 +16,7 @@ export class ParticipantStore {
   messagesTo:Message[] = []                   //
   period = 2
   setPeriod(period: number){
-    this.period = Math.round(period / 50)
+    this.period = Math.max(1, Math.round(period / 50))
     console.log(`Set send period of ${period} for pid:${this.id}`)
   }
   pushOrUpdateMessage(msg: Message){
@@ -29,6 +29,7 @@ export class ParticipantStore {
   }
   sendMessages(){
     if (this.messagesTo.length){
+      //console.log(`send to ${this.id}`)
       try{
         this.socket.send(JSON.stringify(this.messagesTo))
       }
@@ -43,7 +44,6 @@ export class ParticipantStore {
   constructor(id:string, socket:WebSocket){
     this.id = id
     this.socket = socket
-    this.setPeriod(this.period)
   }
 }
 export class RoomStore {
