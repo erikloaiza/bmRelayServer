@@ -1,10 +1,20 @@
+export const MessageTypeAccumulating:{[name: string]: string} = {
+  CONTENT_UPDATE_REQUEST: 'content_update',     //  -> message
+  CONTENT_REMOVE_REQUEST: 'content_remove',     //  -> message
+  LEFT_CONTENT_REMOVE_REQUEST: 'left_content_remove',     //  -> message
+}
+export const MessageTypeAccumulatingSet = new Set()
+for(const key in MessageTypeAccumulating){
+  MessageTypeAccumulatingSet.add(MessageTypeAccumulating[key])
+}
+
+
 export const MessageTypeInstant:{[name: string]: string} = {
   CHAT_MESSAGE: 'm_chat',                       //  -> text chat message
   PARTICIPANT_TRACKLIMITS: 'm_track_limits',    //  -> message, basically does not sync
   YARN_PHONE: 'YARN_PHONE',                     //  -> message
   CALL_REMOTE: 'call_remote',                   //  -> message, to give notification to a remote user.
-  CONTENT_UPDATE_REQUEST: 'content_update',     //  -> message
-  CONTENT_REMOVE_REQUEST: 'content_remove',     //  -> message
+  ...MessageTypeAccumulating
 }
 
 export const messageTypeInstantSet = new Set()

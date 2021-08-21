@@ -7,7 +7,7 @@ import {
   isWebSocketPingEvent,
   WebSocket,
 } from "https://deno.land/std/ws/mod.ts"
-import {Message, messageTypeStoreSet, MessageTypeSpecial} from './Message.ts'
+import {Message, messageTypeStoreSet, MessageTypeSpecial, MessageTypeAccumulating, MessageTypeAccumulatingSet} from './Message.ts'
 
 export class ParticipantStore {
   id: string
@@ -20,11 +20,40 @@ export class ParticipantStore {
     console.log(`Set send period of ${period} for pid:${this.id}`)
   }
   pushOrUpdateMessage(msg: Message){
-    const found = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
-    if (found >= 0){
-      this.messagesTo[found] = msg  //  update
+    if (msg.t === MessageTypeAccumulating.CONTENT_UPDATE_REQUEST) {
+      //  keep last data for each id
+      let mFound = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
+      let values:any[] = []
+      if (mFound >= 0){
+        values = JSON.parse(this.messagesTo[mFound].v) as any[]
+      }else{
+        mFound = this.messagesTo.length
+        this.messagesTo.push(msg)
+      }
+      const vAdd = JSON.parse(msg.v) as any[]
+      for (const a of vAdd){
+        const vFound = values.findIndex(v => v.id === a.id)
+        if (vFound >= 0){
+          values[vFound] = a
+        }else{
+          values.push(a)
+        }
+      }
+      this.messagesTo[mFound].v = JSON.stringify(values)
     }else{
-      this.messagesTo.push(msg)     //  push
+      const found = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
+      if (found >= 0){
+        if (MessageTypeAccumulatingSet.has(msg.t)) {  //  accumurating
+          const vOrg = JSON.parse(this.messagesTo[found].v) as any[]
+          const vAdd = JSON.parse(msg.v) as any[]
+          const vNew = vOrg.concat(vAdd)
+          this.messagesTo[found].v = JSON.stringify(vNew)
+        } else {  //  overwrite
+          this.messagesTo[found] = msg  //  update
+        }
+      }else{
+        this.messagesTo.push(msg)     //  push
+      } 
     }
   }
   sendMessages(){
@@ -179,7 +208,12 @@ async function handleWs(sock: WebSocket) {
 if (import.meta.main) {
   /** websocket message relay server */
   
-  const configText=Deno.readTextFileSync('./config.json')
+  let configText = undefined
+  try{
+    configText = Deno.readTextFileSync('./config.json')
+  }catch(e){
+    //  ignore error
+  }
   const config=configText ? JSON.parse(configText) : undefined
   const port = Deno.args[0] || config?.port || "8443";
   const TLS = Deno.args[1] || config?.tls || false;
