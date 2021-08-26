@@ -153,8 +153,9 @@ async function handleWs(sock: WebSocket) {
             participant.setPeriod(period)
           }
         }else if (msg.t === MessageTypeSpecial.PARTICIPANT_LEFT){
-          room.participants.delete(participant.id)
-          console.log(`Participant ${participant.id} left by message: ${ev}`);
+          const pid = JSON.parse(msg.v)
+          room.participants.delete(pid)
+          console.log(`Participant ${pid} left by message from ${participant.id}: ${ev}`);
         }else{ 
           if (messageTypeStoreSet.has(msg.t)){  //  store message if needed
             participant.storedMessages.set(msg.t, msg)
