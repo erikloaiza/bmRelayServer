@@ -60,7 +60,9 @@ export class ParticipantStore {
     if (this.messagesTo.length){
       //console.log(`send to ${this.id}`)
       try{
-        this.socket.send(JSON.stringify(this.messagesTo))
+        if (!this.socket.isClosed){
+          this.socket.send(JSON.stringify(this.messagesTo))
+        }
       }
       catch(e){
         console.error(e)
