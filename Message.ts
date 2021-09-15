@@ -23,6 +23,7 @@ for(const key in MessageTypeInstant){
 }
 export const MessageTypeSpecial = {
   REQUEST: 'request',
+  REQUEST_TO: 'request_to',
   PARTICIPANT_LEFT: 'm_participant_left',       //  -> remove info
   SET_PERIOD: 'set_period',
 }

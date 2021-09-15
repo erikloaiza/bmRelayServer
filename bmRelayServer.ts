@@ -7,7 +7,7 @@ import {
   isWebSocketPingEvent,
   WebSocket,
 } from "https://deno.land/std/ws/mod.ts"
-import {Message, messageTypeStoreSet, MessageTypeSpecial, MessageTypeAccumulating, MessageTypeAccumulatingSet} from './Message.ts'
+import {Message, messageTypeStoreSet, MessageTypeSpecial, MessageTypeStore, MessageTypeAccumulating, MessageTypeAccumulatingSet} from './Message.ts'
 
 export class ParticipantStore {
   id: string
@@ -17,7 +17,7 @@ export class ParticipantStore {
   period = 2
   setPeriod(period: number){
     this.period = Math.max(1, Math.round(period / 50))
-    console.log(`Set send period of ${period} for pid:${this.id}`)
+    //console.log(`Set send period of ${period} for pid:${this.id}`)
   }
   pushOrUpdateMessage(msg: Message){
     if (msg.t === MessageTypeAccumulating.CONTENT_UPDATE_REQUEST) {
@@ -148,7 +148,31 @@ async function handleWs(sock: WebSocket) {
         if (msg.t === MessageTypeSpecial.REQUEST){
           const msgArrays = Array.from(room.participants.values()).filter(remote => remote.id !== participant.id)
             .map(remote => Array.from(remote.storedMessages.values()))
-          participant.messagesTo = participant.messagesTo.concat(...msgArrays)
+          for(const msgs of msgArrays){
+            for(const msg of msgs){
+                participant.pushOrUpdateMessage(msg)
+            }
+          }
+        }else if (msg.t === MessageTypeSpecial.REQUEST_TO){
+          const pids = JSON.parse(msg.v) as string[]
+          //console.log(`REQUEST_TO ${pids}`)
+          msg.v = ''
+          msg.p = ''
+          for(const pid of pids){
+            const to = room.participants.get(pid)
+            if (to){
+              if (to.storedMessages.has(MessageTypeStore.PARTICIPANT_INFO)){
+                to.storedMessages.forEach(stored => participant.pushOrUpdateMessage(stored))
+                console.log(`Info for ${to.id} found and sent to ${participant.id}.`)
+              }else{
+                const len = to.messagesTo.length
+                to.pushOrUpdateMessage(msg)
+                if (len != to.messagesTo.length){
+                  console.log(`Info for ${to.id} not found and request sent.`)
+                }
+              }
+            }
+          }
         }else if (msg.t === MessageTypeSpecial.SET_PERIOD){
           const period = JSON.parse(msg.v)
           if (period > 0){
@@ -156,8 +180,10 @@ async function handleWs(sock: WebSocket) {
           }
         }else if (msg.t === MessageTypeSpecial.PARTICIPANT_LEFT){
           const pid = JSON.parse(msg.v)
+          const participant = room.participants.get(pid)
+          participant?.socket.close(0, 'left')
           room.participants.delete(pid)
-          console.log(`Participant ${pid} left by message from ${participant.id}: ${ev}`);
+          //  console.log(`Participant ${pid} left by message from ${participant.id}: ${ev}`);
         }else{ 
           if (messageTypeStoreSet.has(msg.t)){  //  store message if needed
             participant.storedMessages.set(msg.t, msg)
@@ -193,7 +219,9 @@ async function handleWs(sock: WebSocket) {
             }
           }
         }
-        console.log(`websocket close. code:${code}, reason:${reason}`)
+        if (code!==0 || reason !== 'left'){
+          console.log(`websocket close. code:${code}, reason:${reason}`)
+        }
       }
     }
   } catch (err) {
