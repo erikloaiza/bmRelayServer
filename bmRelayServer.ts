@@ -1,64 +1,43 @@
-// Copyright 2018-2021 the Deno authors. All rights reserved. MIT license.
-import { serve } from "https://deno.land/std/http/server.ts"
-import { serveTLS } from "https://deno.land/std/http/server.ts"
-import {
-  acceptWebSocket,
-  isWebSocketCloseEvent,
-  isWebSocketPingEvent,
-  WebSocket,
-} from "https://deno.land/std/ws/mod.ts"
-import {Message, messageTypeStoreSet, MessageTypeSpecial, MessageTypeStore, MessageTypeAccumulating, MessageTypeAccumulatingSet} from './Message.ts'
+import {serve} from "https://deno.land/std/http/server.ts"
+import {serveTLS} from "https://deno.land/std/http/server.ts"
+import {acceptWebSocket, isWebSocketCloseEvent, isWebSocketPingEvent, WebSocket} from "https://deno.land/std/ws/mod.ts"
+
+import {Message} from './Message.ts'
+import {ISharedContent, isContentWallpaper, isEqualSharedContentInfo} from './ISharedContent.ts'
+import {MessageType, InstantMessageType, StoredMessageType, InstantMessageKeys, StoredMessageKeys} from './MessageType.ts'
+import {getRect, isOverlapped} from './coordinates.ts'
+
+interface SharedContent extends ISharedContent{
+  updateTime:number
+  updateInfoTime:number
+}
+
+interface ParticipantSent{
+  participant: ParticipantStore,
+  lastSentTime: number 
+}
+interface ContentSent{
+  content: SharedContent,
+  lastSentTime: number 
+}
 
 export class ParticipantStore {
   id: string
   socket:WebSocket
   storedMessages = new Map<string, Message>()   //  key=type
   messagesTo:Message[] = []                   //
-  period = 2
-  setPeriod(period: number){
-    this.period = Math.max(1, Math.round(period / 50))
-    //console.log(`Set send period of ${period} for pid:${this.id}`)
-  }
+  participantsSent:Map<string, ParticipantSent> = new Map()
+  contentsSent:Map<string, ContentSent> = new Map()
   pushOrUpdateMessage(msg: Message){
-    if (msg.t === MessageTypeAccumulating.CONTENT_UPDATE_REQUEST) {
-      //  keep last data for each id
-      let mFound = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
-      let values:any[] = []
-      if (mFound >= 0){
-        values = JSON.parse(this.messagesTo[mFound].v) as any[]
-      }else{
-        mFound = this.messagesTo.length
-        this.messagesTo.push(msg)
-      }
-      const vAdd = JSON.parse(msg.v) as any[]
-      for (const a of vAdd){
-        const vFound = values.findIndex(v => v.id === a.id)
-        if (vFound >= 0){
-          values[vFound] = a
-        }else{
-          values.push(a)
-        }
-      }
-      this.messagesTo[mFound].v = JSON.stringify(values)
+    const found = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
+    if (found >= 0){
+      this.messagesTo[found] = msg  //  update
     }else{
-      const found = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
-      if (found >= 0){
-        if (MessageTypeAccumulatingSet.has(msg.t)) {  //  accumurating
-          const vOrg = JSON.parse(this.messagesTo[found].v) as any[]
-          const vAdd = JSON.parse(msg.v) as any[]
-          const vNew = vOrg.concat(vAdd)
-          this.messagesTo[found].v = JSON.stringify(vNew)
-        } else {  //  overwrite
-          this.messagesTo[found] = msg  //  update
-        }
-      }else{
-        this.messagesTo.push(msg)     //  push
-      } 
-    }
+      this.messagesTo.push(msg)     //  push
+    } 
   }
   sendMessages(){
     if (this.messagesTo.length){
-      //console.log(`send to ${this.id}`)
       try{
         if (!this.socket.isClosed){
           this.socket.send(JSON.stringify(this.messagesTo))
@@ -82,14 +61,34 @@ export class RoomStore {
   constructor(roomId: string){
     this.id = roomId
   }
-  participants = new Map<string, ParticipantStore>()  //  key=source pid
+  participantsMap = new Map<string, ParticipantStore>()  //  key=source pid
+  participants:ParticipantStore[] = []
+
   getParticipant(pid: string, sock: WebSocket){
-    const found = this.participants.get(pid)
+    const found = this.participantsMap.get(pid)
     if (found) { return found }
     const created = new ParticipantStore(pid, sock)
-    this.participants.set(pid, created)
+    this.participantsMap.set(pid, created)
+    this.participants.push(created)
     return created
   }
+  onParticipantLeft(participant: ParticipantStore){
+    this.participantsMap.delete(participant.id)
+    const idx = this.participants.findIndex(p => p === participant)
+    this.participants.splice(idx, 1)
+    if (this.participantsMap.size === 0){
+      this.contents.forEach(c => {
+        if (!isContentWallpaper(c)){ this.contents.delete(c.id) }
+      })
+    }   
+  }
+
+  //  room properties
+  properties = new Map<string, string>()
+  
+  //  room contents
+  contents = new Map<string, SharedContent>()
+//  contents:SharedContent[] = []
 }
 
 class Rooms{
@@ -107,98 +106,160 @@ class Rooms{
   clear(){
     this.rooms = new Map()
   }
-  constructor(){
-    this.startSendInterval()
-  }
-  startSendInterval(){
-    setInterval(()=>{
-      for(const room of this.rooms.values()){
-        for(const participant of room.participants.values()){
-          if (this.sendCount % participant.period === 0){
-            participant.sendMessages()
-          }
-        }
-      }
-      this.sendCount ++
-      if (this.sendCount === 2*3*5*7*11*13*17*19*23){
-        this.sendCount = 0
-      }
-    }, 50)
-  }
 }
 const rooms = new Rooms();
 (window as any).rooms = rooms
-interface Socket{
-  rid: string
-  pid: string
+
+type MessageHandler = (msg: Message, room: RoomStore, sock: WebSocket) => void
+const messageHandlers = new Map<string, MessageHandler>()
+
+function instantMessageHandler(msg: Message, room: RoomStore){
+  //  send message to destination or all remotes
+  //  console.log(`instantMessageHandler ${msg.t}`, msg)
+  if (msg.d){
+    const to = room.participantsMap.get(msg.d)
+    if (to){
+      to.pushOrUpdateMessage(msg)
+    }
+  }else{
+    const remotes = Array.from(room.participants.values()).filter(remote => remote.id !== msg.p)
+    remotes.forEach(remote => remote.pushOrUpdateMessage(msg))
+  }
 }
+function storedMessageHandler(msg: Message, room: RoomStore, sock: WebSocket){
+  //  console.log(`storedMessageHandler ${msg.t}`, msg)
+  const participant = room.getParticipant(msg.p, sock)
+  participant.storedMessages.set(msg.t, msg)
+  instantMessageHandler(msg, room)
+}
+for(const key in StoredMessageType){
+  messageHandlers.set(StoredMessageType[key as StoredMessageKeys], storedMessageHandler)
+}
+for(const key in InstantMessageType){
+  messageHandlers.set(InstantMessageType[key as InstantMessageKeys], instantMessageHandler)
+}
+
+messageHandlers.set(MessageType.REQUEST_ALL, (msg, room, sock) => {
+  const participant = room.getParticipant(msg.p, sock)
+  room.participants.forEach(remote => {
+    remote.storedMessages.forEach(msg => participant.pushOrUpdateMessage(msg))
+  })
+})
+messageHandlers.set(MessageType.REQUEST_RANGE, (msg, room, sock) => {
+  const range = JSON.parse(msg.v) as number[]
+  const participant = room.getParticipant(msg.p, sock)
+  const overlaps = Array.from(room.contents.values()).filter(c => isOverlapped(getRect(c.pose, c.size), range))
+  const contentsToSend = overlaps.filter(c => {
+    const sent = participant.contentsSent.get(c.id)
+    if (sent){
+      if (sent.lastSentTime < c.updateTime){
+        sent.lastSentTime = c.updateTime
+        return true
+      }else{
+        return false
+      }
+    }
+    participant.contentsSent.set(c.id, {content:c, lastSentTime: c.updateTime})
+    return true
+  })
+  //  if (overlaps.length){ console.log(`REQUEST_RANGE overlap:${overlaps.length} send:${contentsToSend.length}`) }
+  if (contentsToSend.length){
+    const msgToSend = {r:room.id, t:MessageType.CONTENT_UPDATE_REQUEST, p:'', d:'', v:JSON.stringify(contentsToSend)}
+    participant.pushOrUpdateMessage(msgToSend)  
+    console.log(`Contents ${contentsToSend.map(c=>c.id)} sent.`)  
+  }
+  participant.sendMessages()
+})
+messageHandlers.set(MessageType.REQUEST_TO, (msg, room, sock) => {
+  const pids = JSON.parse(msg.v) as string[]
+  //console.log(`REQUEST_TO ${pids}`)
+  const from = msg.p
+  msg.v = ''
+  msg.p = ''
+  for(const pid of pids){
+    const to = room.participantsMap.get(pid)
+    if (to){
+      if (to.storedMessages.has(MessageType.PARTICIPANT_INFO)){
+        const participant = room.getParticipant(from, sock)
+        to.storedMessages.forEach(stored => participant?.pushOrUpdateMessage(stored))
+        console.log(`Info for ${to.id} found and sent to ${participant?.id}.`)
+      }else{
+        const len = to.messagesTo.length
+        to.pushOrUpdateMessage(msg)
+        if (len != to.messagesTo.length){
+          console.log(`Info for ${to.id} not found and request sent.`)
+        }
+      }
+    }
+  }
+})
+messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, room) => {
+  const pid = JSON.parse(msg.v) as string
+  const participant = room.participantsMap.get(pid ? pid : msg.p)
+  if (participant){
+    participant.socket.close(1000, 'closed by PARTICIPANT_LEFT message.')
+    room.onParticipantLeft(participant)
+    console.log(`participant ${msg.p} left. ${room.participants.length} remain.`)
+  }else{
+    //  console.error(`PARTICIPANT_LEFT can not find pid=${msg.p}`)
+  }
+})
+
+messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, room, sock) => {
+  const cs = JSON.parse(msg.v) as SharedContent[]
+  const participant = room.getParticipant(msg.p, sock)
+  const time = Date.now()
+  for(const c of cs){
+    //  upate room's content
+    c.updateTime = time
+    const old = room.contents.get(c.id)
+    if (old && !isEqualSharedContentInfo(old, c)) {
+      c.updateInfoTime = time
+    }
+
+    room.contents.set(c.id, c)
+    //  The sender should not receive the update. 
+    participant.contentsSent.set(c.id, {content:c, lastSentTime: c.updateTime})
+  }
+  console.log(`Contents update ${cs.map(c=>c.id)} at ${time}`)
+})
+
+messageHandlers.set(MessageType.CONTENT_REMOVE_REQUEST, (msg, room) => {
+  const cids = JSON.parse(msg.v) as string[]
+  //   delete contents
+  for(const cid of cids){
+    room.contents.delete(cid)
+  }
+  //  forward remove request to all participants
+  const remotes = Array.from(room.participants.values()).filter(participant => participant.id !== msg.p)
+  remotes.forEach(participant => {
+    const cidsForMsg:string[] = []
+    for(const cid of cids){
+      if (participant.contentsSent.delete(cid)){ cidsForMsg.push(cid) }
+    }
+    msg.v = JSON.stringify(cidsForMsg)
+    participant.pushOrUpdateMessage(msg)
+  })
+})
 
 async function handleWs(sock: WebSocket) {
   try {
     for await (const ev of sock) {
       if (typeof ev === "string") {
         // text message.
-        //  console.log('ws:', ev);
         const msg = JSON.parse(ev) as Message
-        if (!msg.p || !msg.r || !msg.t){
+        if (!msg.r || !msg.t){
           console.error(`Invalid message: ${ev}`)
         }
+        //  if (msg.t !== MessageType.REQUEST_RANGE){ console.log('ws:', ev); }
         const room = rooms.get(msg.r)
-        const participant = room.getParticipant(msg.p, sock)
-        if (msg.t === MessageTypeSpecial.REQUEST){
-          const msgArrays = Array.from(room.participants.values()).filter(remote => remote.id !== participant.id)
-            .map(remote => Array.from(remote.storedMessages.values()))
-          for(const msgs of msgArrays){
-            for(const msg of msgs){
-                participant.pushOrUpdateMessage(msg)
-            }
-          }
-        }else if (msg.t === MessageTypeSpecial.REQUEST_TO){
-          const pids = JSON.parse(msg.v) as string[]
-          //console.log(`REQUEST_TO ${pids}`)
-          msg.v = ''
-          msg.p = ''
-          for(const pid of pids){
-            const to = room.participants.get(pid)
-            if (to){
-              if (to.storedMessages.has(MessageTypeStore.PARTICIPANT_INFO)){
-                to.storedMessages.forEach(stored => participant.pushOrUpdateMessage(stored))
-                console.log(`Info for ${to.id} found and sent to ${participant.id}.`)
-              }else{
-                const len = to.messagesTo.length
-                to.pushOrUpdateMessage(msg)
-                if (len != to.messagesTo.length){
-                  console.log(`Info for ${to.id} not found and request sent.`)
-                }
-              }
-            }
-          }
-        }else if (msg.t === MessageTypeSpecial.SET_PERIOD){
-          const period = JSON.parse(msg.v)
-          if (period > 0){
-            participant.setPeriod(period)
-          }
-        }else if (msg.t === MessageTypeSpecial.PARTICIPANT_LEFT){
-          const pid = JSON.parse(msg.v)
-          const participant = room.participants.get(pid)
-          participant?.socket.close(0, 'left')
-          room.participants.delete(pid)
-          //  console.log(`Participant ${pid} left by message from ${participant.id}: ${ev}`);
-        }else{ 
-          if (messageTypeStoreSet.has(msg.t)){  //  store message if needed
-            participant.storedMessages.set(msg.t, msg)
-          }
-          //  send message to destination or all remotes
-          if (msg.d){
-            const to = room.participants.get(msg.d)
-            if (to){
-              to.pushOrUpdateMessage(msg)
-            }
-          }else{
-            const remotes = Array.from(room.participants.values()).filter(remote => remote.id !== participant.id)
-            remotes.forEach(remote => remote.pushOrUpdateMessage(msg))
-          }
+        const handler = messageHandlers.get(msg.t)
+        if (handler){
+          handler(msg, room, sock)
+        }else{
+          console.error(`No message handler for ${msg.t} - ${ev}`)
         }
+
       } else if (ev instanceof Uint8Array) {
         // binary message.
         console.log("ws:Binary", ev);
@@ -213,8 +274,7 @@ async function handleWs(sock: WebSocket) {
           for(const participant of room.participants.values()){
             if (participant.socket === sock){
               console.warn(`Participant ${participant.id} left by websocket close code:${code}, reason:${reason}.`);
-              room.participants.delete(participant.id)
-
+              room.onParticipantLeft(participant)
               return
             }
           }
@@ -242,10 +302,10 @@ if (import.meta.main) {
   let configText = undefined
   try{
     configText = Deno.readTextFileSync('./config.json')
-  }catch(e){
+  }catch{
     //  ignore error
   }
-  const config=configText ? JSON.parse(configText) : undefined
+  const config = configText ? JSON.parse(configText) : undefined
   const port = Deno.args[0] || config?.port || "8443";
   const TLS = Deno.args[1] || config?.tls || false;
   console.log(`Websocket server is running on :${port}${TLS ? ' with TLS' : ''}.`);
