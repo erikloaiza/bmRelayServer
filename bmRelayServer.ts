@@ -3,22 +3,26 @@ import {serveTLS} from "https://deno.land/std/http/server.ts"
 import {acceptWebSocket, isWebSocketCloseEvent, isWebSocketPingEvent, WebSocket} from "https://deno.land/std/ws/mod.ts"
 
 import {Message} from './Message.ts'
-import {ISharedContent, isContentWallpaper, isEqualSharedContentInfo} from './ISharedContent.ts'
+import {extractSharedContentInfo, ISharedContent, SharedContentInfo, isContentWallpaper, isEqualSharedContentInfo} from './ISharedContent.ts'
 import {MessageType, InstantMessageType, StoredMessageType, InstantMessageKeys, StoredMessageKeys} from './MessageType.ts'
 import {getRect, isOverlapped} from './coordinates.ts'
 
-interface SharedContent extends ISharedContent{
-  updateTime:number
-  updateInfoTime:number
-}
-
 interface ParticipantSent{
   participant: ParticipantStore,
-  lastSentTime: number 
+  timestamp: number 
+}
+interface Content{
+  content: ISharedContent,
+  timeUpdate: number,
+  timeUpdateInfo: number 
 }
 interface ContentSent{
-  content: SharedContent,
-  lastSentTime: number 
+  content: ISharedContent,
+  timeSent: number 
+}
+interface ContentInfoSent{
+  content: SharedContentInfo,
+  timeSent: number 
 }
 
 export class ParticipantStore {
@@ -28,6 +32,7 @@ export class ParticipantStore {
   messagesTo:Message[] = []                   //
   participantsSent:Map<string, ParticipantSent> = new Map()
   contentsSent:Map<string, ContentSent> = new Map()
+  contentsInfoSent:Map<string, ContentInfoSent> = new Map()
   pushOrUpdateMessage(msg: Message){
     const found = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
     if (found >= 0){
@@ -56,6 +61,7 @@ export class ParticipantStore {
     this.socket = socket
   }
 }
+
 export class RoomStore {
   id: string  //  room id
   constructor(roomId: string){
@@ -78,7 +84,7 @@ export class RoomStore {
     this.participants.splice(idx, 1)
     if (this.participantsMap.size === 0){
       this.contents.forEach(c => {
-        if (!isContentWallpaper(c)){ this.contents.delete(c.id) }
+        if (!isContentWallpaper(c.content)){ this.contents.delete(c.content.id) }
       })
     }   
   }
@@ -87,8 +93,7 @@ export class RoomStore {
   properties = new Map<string, string>()
   
   //  room contents
-  contents = new Map<string, SharedContent>()
-//  contents:SharedContent[] = []
+  contents = new Map<string, Content>()
 }
 
 class Rooms{
@@ -145,31 +150,75 @@ messageHandlers.set(MessageType.REQUEST_ALL, (msg, room, sock) => {
     remote.storedMessages.forEach(msg => participant.pushOrUpdateMessage(msg))
   })
 })
+
+
 messageHandlers.set(MessageType.REQUEST_RANGE, (msg, room, sock) => {
   const range = JSON.parse(msg.v) as number[]
   const participant = room.getParticipant(msg.p, sock)
-  const overlaps = Array.from(room.contents.values()).filter(c => isOverlapped(getRect(c.pose, c.size), range))
+
+  //  Find contents updated and in the range.
+  const contents = Array.from(room.contents.values())
+  const overlaps = contents.filter(c => isOverlapped(getRect(c.content.pose, c.content.size), range))
   const contentsToSend = overlaps.filter(c => {
-    const sent = participant.contentsSent.get(c.id)
+    const sent = participant.contentsSent.get(c.content.id)
     if (sent){
-      if (sent.lastSentTime < c.updateTime){
-        sent.lastSentTime = c.updateTime
+      if (sent.timeSent < c.timeUpdate){
+        sent.timeSent = c.timeUpdate
         return true
       }else{
         return false
       }
     }
-    participant.contentsSent.set(c.id, {content:c, lastSentTime: c.updateTime})
+    participant.contentsSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdate})
     return true
-  })
-  //  if (overlaps.length){ console.log(`REQUEST_RANGE overlap:${overlaps.length} send:${contentsToSend.length}`) }
+  }).map(c => c.content)
+  //if (overlaps.length){ console.log(`REQUEST_RANGE overlap:${overlaps.length} send:${contentsToSend.length}`) }
   if (contentsToSend.length){
     const msgToSend = {r:room.id, t:MessageType.CONTENT_UPDATE_REQUEST, p:'', d:'', v:JSON.stringify(contentsToSend)}
     participant.pushOrUpdateMessage(msgToSend)  
     console.log(`Contents ${contentsToSend.map(c=>c.id)} sent.`)  
   }
+
+  //  Find contentsInfo updated.
+  const contentsInfoToSend = contents.filter(c => {
+    const sent = participant.contentsInfoSent.get(c.content.id)
+    if (sent){
+      if (sent.timeSent < c.timeUpdateInfo){
+        sent.timeSent = c.timeUpdateInfo
+        return true
+      }else{
+        return false
+      }
+    }
+    participant.contentsInfoSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdateInfo})
+    return true
+  }).map(c => extractSharedContentInfo(c.content))
+  if (contentsInfoToSend.length){
+    const msgToSend = {r:room.id, t:MessageType.CONTENT_INFO_UPDATE, p:'', d:'', v:JSON.stringify(contentsInfoToSend)}
+    participant.pushOrUpdateMessage(msgToSend)
+    console.log(`Contents info ${contentsInfoToSend.map(c=>c.id)} sent.`)
+  }
+
   participant.sendMessages()
 })
+
+
+messageHandlers.set(MessageType.CONTENT_REQUEST_BY_ID, (msg, room, sock)=> {
+  const cids = JSON.parse(msg.v) as string[]
+  const participant = room.getParticipant(msg.p, sock)
+  const cs:ISharedContent[] = []
+  for (const cid of cids) {
+    const c = room.contents.get(cid)
+    if (c) {
+      cs.push(c.content)
+      participant.contentsSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdate})
+    }
+  }
+  msg.v = JSON.stringify(cs)
+  msg.t = MessageType.CONTENT_UPDATE_REQUEST
+  participant.pushOrUpdateMessage(msg)
+})
+
 messageHandlers.set(MessageType.REQUEST_TO, (msg, room, sock) => {
   const pids = JSON.parse(msg.v) as string[]
   //console.log(`REQUEST_TO ${pids}`)
@@ -193,6 +242,7 @@ messageHandlers.set(MessageType.REQUEST_TO, (msg, room, sock) => {
     }
   }
 })
+
 messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, room) => {
   const pid = JSON.parse(msg.v) as string
   const participant = room.participantsMap.get(pid ? pid : msg.p)
@@ -206,20 +256,21 @@ messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, room) => {
 })
 
 messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, room, sock) => {
-  const cs = JSON.parse(msg.v) as SharedContent[]
+  const cs = JSON.parse(msg.v) as ISharedContent[]
   const participant = room.getParticipant(msg.p, sock)
   const time = Date.now()
-  for(const c of cs){
+  for(const base of cs){
     //  upate room's content
-    c.updateTime = time
-    const old = room.contents.get(c.id)
-    if (old && !isEqualSharedContentInfo(old, c)) {
-      c.updateInfoTime = time
+    const old = room.contents.get(base.id)
+    const c:Content = {content:base, timeUpdate: time, timeUpdateInfo: old?old.timeUpdateInfo:time}
+    if (old && !isEqualSharedContentInfo(old.content, c.content)) {
+      c.timeUpdateInfo = time
     }
 
-    room.contents.set(c.id, c)
+    room.contents.set(c.content.id, c)
     //  The sender should not receive the update. 
-    participant.contentsSent.set(c.id, {content:c, lastSentTime: c.updateTime})
+    participant.contentsSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdate})
+    participant.contentsInfoSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdateInfo})
   }
   console.log(`Contents update ${cs.map(c=>c.id)} at ${time}`)
 })
@@ -230,15 +281,18 @@ messageHandlers.set(MessageType.CONTENT_REMOVE_REQUEST, (msg, room) => {
   for(const cid of cids){
     room.contents.delete(cid)
   }
-  //  forward remove request to all participants
+  //  forward remove request to all remote participants
   const remotes = Array.from(room.participants.values()).filter(participant => participant.id !== msg.p)
-  remotes.forEach(participant => {
+  remotes.forEach(remote => {
     const cidsForMsg:string[] = []
     for(const cid of cids){
-      if (participant.contentsSent.delete(cid)){ cidsForMsg.push(cid) }
+      if (remote.contentsSent.delete(cid)){ cidsForMsg.push(cid) }
+      remote.contentsInfoSent.delete(cid)
     }
     msg.v = JSON.stringify(cidsForMsg)
-    participant.pushOrUpdateMessage(msg)
+    remote.pushOrUpdateMessage(msg)
+    const msgInfo:Message = {t:MessageType.CONTENT_INFO_REMOVE, p:msg.p, r:msg.r, d:msg.d, v:JSON.stringify(cids)}
+    remote.pushOrUpdateMessage(msgInfo)
   })
 })
 
