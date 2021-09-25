@@ -2,123 +2,15 @@ import {serve} from "https://deno.land/std/http/server.ts"
 import {serveTLS} from "https://deno.land/std/http/server.ts"
 import {acceptWebSocket, isWebSocketCloseEvent, isWebSocketPingEvent, WebSocket} from "https://deno.land/std/ws/mod.ts"
 
-import {Message} from './Message.ts'
-import {extractSharedContentInfo, ISharedContent, SharedContentInfo, isContentWallpaper, isEqualSharedContentInfo} from './ISharedContent.ts'
-import {MessageType, InstantMessageType, StoredMessageType, InstantMessageKeys, StoredMessageKeys} from './MessageType.ts'
-import {getRect, isOverlapped} from './coordinates.ts'
+import {BMMessage as Message} from './BMMessage.ts'
+import {extractSharedContentInfo, ISharedContent, isEqualSharedContentInfo} from './ISharedContent.ts'
+import {MessageType, InstantMessageType, StoredMessageType, InstantMessageKeys, StoredMessageKeys, ParticipantMessageType, 
+  ParticipantMessageKeys} from './MessageType.ts'
+import {getRect, isOverlapped, isInRect, str2Mouse, str2Pose} from './coordinates.ts'
 
-interface ParticipantSent{
-  participant: ParticipantStore,
-  timestamp: number 
-}
-interface Content{
-  content: ISharedContent,
-  timeUpdate: number,
-  timeUpdateInfo: number 
-}
-interface ContentSent{
-  content: ISharedContent,
-  timeSent: number 
-}
-interface ContentInfoSent{
-  content: SharedContentInfo,
-  timeSent: number 
-}
+import {messageHandlers, rooms, RoomStore, ParticipantStore} from './Stores.ts'
 
-export class ParticipantStore {
-  id: string
-  socket:WebSocket
-  storedMessages = new Map<string, Message>()   //  key=type
-  messagesTo:Message[] = []                   //
-  participantsSent:Map<string, ParticipantSent> = new Map()
-  contentsSent:Map<string, ContentSent> = new Map()
-  contentsInfoSent:Map<string, ContentInfoSent> = new Map()
-  pushOrUpdateMessage(msg: Message){
-    const found = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
-    if (found >= 0){
-      this.messagesTo[found] = msg  //  update
-    }else{
-      this.messagesTo.push(msg)     //  push
-    } 
-  }
-  sendMessages(){
-    if (this.messagesTo.length){
-      try{
-        if (!this.socket.isClosed){
-          this.socket.send(JSON.stringify(this.messagesTo))
-        }
-      }
-      catch(e){
-        console.error(e)
-      }
-      this.messagesTo = []
-      //console.log(`${this.messagesTo.length} msg sent to ${this.id} v:${JSON.stringify(this.messagesTo)}`)
-    }
-  }
-  
-  constructor(id:string, socket:WebSocket){
-    this.id = id
-    this.socket = socket
-  }
-}
-
-export class RoomStore {
-  id: string  //  room id
-  constructor(roomId: string){
-    this.id = roomId
-  }
-  participantsMap = new Map<string, ParticipantStore>()  //  key=source pid
-  participants:ParticipantStore[] = []
-
-  getParticipant(pid: string, sock: WebSocket){
-    const found = this.participantsMap.get(pid)
-    if (found) { return found }
-    const created = new ParticipantStore(pid, sock)
-    this.participantsMap.set(pid, created)
-    this.participants.push(created)
-    return created
-  }
-  onParticipantLeft(participant: ParticipantStore){
-    this.participantsMap.delete(participant.id)
-    const idx = this.participants.findIndex(p => p === participant)
-    this.participants.splice(idx, 1)
-    if (this.participantsMap.size === 0){
-      this.contents.forEach(c => {
-        if (!isContentWallpaper(c.content)){ this.contents.delete(c.content.id) }
-      })
-    }   
-  }
-
-  //  room properties
-  properties = new Map<string, string>()
-  
-  //  room contents
-  contents = new Map<string, Content>()
-}
-
-class Rooms{
-  rooms:Map<string, RoomStore> = new Map()
-  sendCount = 0;
-  get(name: string){
-    const found = this.rooms.get(name)
-    if (found){
-      return found
-    }
-    const create = new RoomStore(name)
-    this.rooms.set(name, create)
-    return create
-  }
-  clear(){
-    this.rooms = new Map()
-  }
-}
-const rooms = new Rooms();
-(window as any).rooms = rooms
-
-type MessageHandler = (msg: Message, room: RoomStore, sock: WebSocket) => void
-const messageHandlers = new Map<string, MessageHandler>()
-
-function instantMessageHandler(msg: Message, room: RoomStore){
+function instantMessageHandler(msg: Message, _participant:ParticipantStore, room: RoomStore){
   //  send message to destination or all remotes
   //  console.log(`instantMessageHandler ${msg.t}`, msg)
   if (msg.d){
@@ -131,11 +23,13 @@ function instantMessageHandler(msg: Message, room: RoomStore){
     remotes.forEach(remote => remote.pushOrUpdateMessage(msg))
   }
 }
-function storedMessageHandler(msg: Message, room: RoomStore, sock: WebSocket){
+function storedMessageHandler(msg: Message, participant: ParticipantStore, room: RoomStore){
   //  console.log(`storedMessageHandler ${msg.t}`, msg)
-  const participant = room.getParticipant(msg.p, sock)
   participant.storedMessages.set(msg.t, msg)
-  instantMessageHandler(msg, room)
+  instantMessageHandler(msg, participant, room)
+}
+function participantMessageHandler(msg: Message, participant: ParticipantStore){
+  participant.participantStates.set(msg.t, {type:msg.t, updateTime: Date.now(), value:msg.v})
 }
 for(const key in StoredMessageType){
   messageHandlers.set(StoredMessageType[key as StoredMessageKeys], storedMessageHandler)
@@ -143,24 +37,75 @@ for(const key in StoredMessageType){
 for(const key in InstantMessageType){
   messageHandlers.set(InstantMessageType[key as InstantMessageKeys], instantMessageHandler)
 }
+for(const key in ParticipantMessageType){
+  messageHandlers.set(ParticipantMessageType[key as ParticipantMessageKeys], participantMessageHandler)
+}
 
-messageHandlers.set(MessageType.REQUEST_ALL, (msg, room, sock) => {
-  const participant = room.getParticipant(msg.p, sock)
+messageHandlers.set(MessageType.PARTICIPANT_POSE, (msg, participant) => {
+  //  console.log(`str2Pose(${msg.v}) = ${JSON.stringify(str2Pose(JSON.parse(msg.v)))}`)
+  participant.pose = str2Pose(JSON.parse(msg.v))
+  participant.participantStates.set(msg.t, {type:msg.t, value:msg.v, updateTime:Date.now()})
+})
+messageHandlers.set(MessageType.PARTICIPANT_MOUSE, (msg, participant) => {
+  participant.mousePos = str2Mouse(JSON.parse(msg.v)).position
+  participant.mouseUpdateTime = Date.now()
+})
+messageHandlers.set(MessageType.REQUEST_ALL, (_msg, participant, room) => {
   room.participants.forEach(remote => {
     remote.storedMessages.forEach(msg => participant.pushOrUpdateMessage(msg))
   })
 })
 
-
-messageHandlers.set(MessageType.REQUEST_RANGE, (msg, room, sock) => {
+messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
   const range = JSON.parse(msg.v) as number[]
-  const participant = room.getParticipant(msg.p, sock)
+
+    //  Find participant states updated and in the range
+    {
+    const overlaps = room.participants.filter(p => p.pose && isInRect(p.pose.position, range))
+    const lastAndNow = [... new Set(overlaps.concat(from.overlappedParticipants))]
+    if (lastAndNow.length !== overlaps.length){
+      console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
+    }
+    from.overlappedParticipants = overlaps
+    for (const p of lastAndNow) {
+      const sentTime = from.timeSentStates.get(p.id)
+      let latest = sentTime ? sentTime : 0
+      p.participantStates.forEach((s, mt) => {
+        if (!sentTime || s.updateTime > sentTime){
+          from.pushOrUpdateMessage({t:mt, v:s.value, p:p.id})
+          latest = Math.max(latest, s.updateTime)
+        }
+      })
+      from.timeSentStates.set(p.id, latest)
+    }
+  }
+  //  Check mouse is in the range and updated
+  {
+    const overlaps = room.participants.filter(p => p.mousePos && isInRect(p.mousePos, range))
+    const lastAndNow = [... new Set(overlaps.concat(from.overlappedMouses))]
+    if (lastAndNow.length !== overlaps.length){
+      console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
+    }
+    from.overlappedMouses = overlaps
+    for (const p of lastAndNow) {
+      const sentTime = from.timeSentMouse.get(p.id)
+      if (p.mouseMessage && (!sentTime || p.mouseUpdateTime > sentTime)){
+        from.pushOrUpdateMessage({t:MessageType.PARTICIPANT_MOUSE, v:p.mouseMessage, p:p.id})
+      }
+      from.timeSentMouse.set(p.id, p.mouseUpdateTime)
+    }
+  }
 
   //  Find contents updated and in the range.
   const contents = Array.from(room.contents.values())
   const overlaps = contents.filter(c => isOverlapped(getRect(c.content.pose, c.content.size), range))
-  const contentsToSend = overlaps.filter(c => {
-    const sent = participant.contentsSent.get(c.content.id)
+  const lastAndNow = [... new Set(overlaps.concat(from.overlappedContents))]
+  if (lastAndNow.length !== overlaps.length){
+    console.log(`RANGE overlap:${overlaps.map(c=>c.content.id)} lastAndNow:${lastAndNow.map(c=>c.content.id)}`)
+  }
+  from.overlappedContents = overlaps
+  const contentsToSend = lastAndNow.filter(c => {
+    const sent = from.contentsSent.get(c.content.id)
     if (sent){
       if (sent.timeSent < c.timeUpdate){
         sent.timeSent = c.timeUpdate
@@ -169,19 +114,19 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, room, sock) => {
         return false
       }
     }
-    participant.contentsSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdate})
+    from.contentsSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdate})
     return true
   }).map(c => c.content)
   //if (overlaps.length){ console.log(`REQUEST_RANGE overlap:${overlaps.length} send:${contentsToSend.length}`) }
   if (contentsToSend.length){
     const msgToSend = {r:room.id, t:MessageType.CONTENT_UPDATE_REQUEST, p:'', d:'', v:JSON.stringify(contentsToSend)}
-    participant.pushOrUpdateMessage(msgToSend)  
+    from.pushOrUpdateMessage(msgToSend)  
     console.log(`Contents ${contentsToSend.map(c=>c.id)} sent.`)  
   }
 
   //  Find contentsInfo updated.
   const contentsInfoToSend = contents.filter(c => {
-    const sent = participant.contentsInfoSent.get(c.content.id)
+    const sent = from.contentsInfoSent.get(c.content.id)
     if (sent){
       if (sent.timeSent < c.timeUpdateInfo){
         sent.timeSent = c.timeUpdateInfo
@@ -190,22 +135,40 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, room, sock) => {
         return false
       }
     }
-    participant.contentsInfoSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdateInfo})
+    from.contentsInfoSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdateInfo})
     return true
   }).map(c => extractSharedContentInfo(c.content))
   if (contentsInfoToSend.length){
     const msgToSend = {r:room.id, t:MessageType.CONTENT_INFO_UPDATE, p:'', d:'', v:JSON.stringify(contentsInfoToSend)}
-    participant.pushOrUpdateMessage(msgToSend)
+    from.pushOrUpdateMessage(msgToSend)
     console.log(`Contents info ${contentsInfoToSend.map(c=>c.id)} sent.`)
   }
 
-  participant.sendMessages()
+  from.sendMessages()
+})
+
+messageHandlers.set(MessageType.REQUEST_PARTICIPANT_STATES, (msg, from, room)=> {
+  const pids = JSON.parse(msg.v) as string[]
+  for (const pid of pids) {
+    const p = room.participantsMap.get(pid)
+    if (p){
+      const sentTime = from.timeSentStates.get(p.id)
+      let latest = sentTime ? sentTime : 0
+      p.participantStates.forEach((s, mt) => {
+        if (!sentTime || s.updateTime > sentTime){
+          from.pushOrUpdateMessage({t:mt, v:s.value, p:p.id})
+          latest = Math.max(latest, s.updateTime)
+        }
+      })
+      from.timeSentStates.set(p.id, latest)  
+    }
+  }
+  from.sendMessages()
 })
 
 
-messageHandlers.set(MessageType.CONTENT_REQUEST_BY_ID, (msg, room, sock)=> {
+messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST_BY_ID, (msg, participant, room)=> {
   const cids = JSON.parse(msg.v) as string[]
-  const participant = room.getParticipant(msg.p, sock)
   const cs:ISharedContent[] = []
   for (const cid of cids) {
     const c = room.contents.get(cid)
@@ -219,19 +182,19 @@ messageHandlers.set(MessageType.CONTENT_REQUEST_BY_ID, (msg, room, sock)=> {
   participant.pushOrUpdateMessage(msg)
 })
 
-messageHandlers.set(MessageType.REQUEST_TO, (msg, room, sock) => {
+//  need fix
+/*
+messageHandlers.set(MessageType.REQUEST_TO, (msg, participant, room) => {
   const pids = JSON.parse(msg.v) as string[]
   //console.log(`REQUEST_TO ${pids}`)
-  const from = msg.p
   msg.v = ''
   msg.p = ''
   for(const pid of pids){
     const to = room.participantsMap.get(pid)
     if (to){
       if (to.storedMessages.has(MessageType.PARTICIPANT_INFO)){
-        const participant = room.getParticipant(from, sock)
-        to.storedMessages.forEach(stored => participant?.pushOrUpdateMessage(stored))
-        console.log(`Info for ${to.id} found and sent to ${participant?.id}.`)
+        to.storedMessages.forEach(stored => participant.pushOrUpdateMessage(stored))
+        console.log(`Info for ${to.id} found and sent to ${participant.id}.`)
       }else{
         const len = to.messagesTo.length
         to.pushOrUpdateMessage(msg)
@@ -242,10 +205,11 @@ messageHandlers.set(MessageType.REQUEST_TO, (msg, room, sock) => {
     }
   }
 })
+*/
 
-messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, room) => {
+messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
   const pid = JSON.parse(msg.v) as string
-  const participant = room.participantsMap.get(pid ? pid : msg.p)
+  const participant = pid ? room.participantsMap.get(pid) : from
   if (participant){
     participant.socket.close(1000, 'closed by PARTICIPANT_LEFT message.')
     room.onParticipantLeft(participant)
@@ -255,19 +219,20 @@ messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, room) => {
   }
 })
 
-messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, room, sock) => {
+messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, participant, room) => {
   const cs = JSON.parse(msg.v) as ISharedContent[]
-  const participant = room.getParticipant(msg.p, sock)
   const time = Date.now()
-  for(const base of cs){
+  for(const newContent of cs){
     //  upate room's content
-    const old = room.contents.get(base.id)
-    const c:Content = {content:base, timeUpdate: time, timeUpdateInfo: old?old.timeUpdateInfo:time}
-    if (old && !isEqualSharedContentInfo(old.content, c.content)) {
-      c.timeUpdateInfo = time
+    let c = room.contents.get(newContent.id)
+    if (c){
+      c.timeUpdate = time
+      if (!isEqualSharedContentInfo(c.content, newContent)) { c.timeUpdateInfo = time }
+      c.content = newContent
+    }else{
+      c = {content:newContent, timeUpdate: time, timeUpdateInfo: time}
+      room.contents.set(c.content.id, c)
     }
-
-    room.contents.set(c.content.id, c)
     //  The sender should not receive the update. 
     participant.contentsSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdate})
     participant.contentsInfoSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdateInfo})
@@ -275,7 +240,7 @@ messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, room, sock) => {
   console.log(`Contents update ${cs.map(c=>c.id)} at ${time}`)
 })
 
-messageHandlers.set(MessageType.CONTENT_REMOVE_REQUEST, (msg, room) => {
+messageHandlers.set(MessageType.CONTENT_REMOVE_REQUEST, (msg, _participant, room) => {
   const cids = JSON.parse(msg.v) as string[]
   //   delete contents
   for(const cid of cids){
@@ -284,15 +249,13 @@ messageHandlers.set(MessageType.CONTENT_REMOVE_REQUEST, (msg, room) => {
   //  forward remove request to all remote participants
   const remotes = Array.from(room.participants.values()).filter(participant => participant.id !== msg.p)
   remotes.forEach(remote => {
-    const cidsForMsg:string[] = []
     for(const cid of cids){
-      if (remote.contentsSent.delete(cid)){ cidsForMsg.push(cid) }
+      remote.contentsSent.delete(cid)
       remote.contentsInfoSent.delete(cid)
+      const idx = remote.overlappedContents.findIndex(c => c.content.id === cid)
+      if (idx >= 0){ remote.overlappedContents.splice(idx, 1) }
     }
-    msg.v = JSON.stringify(cidsForMsg)
-    remote.pushOrUpdateMessage(msg)
-    const msgInfo:Message = {t:MessageType.CONTENT_INFO_REMOVE, p:msg.p, r:msg.r, d:msg.d, v:JSON.stringify(cids)}
-    remote.pushOrUpdateMessage(msgInfo)
+    remote.pushOrUpdateMessage(msg)    
   })
 })
 
@@ -302,18 +265,32 @@ async function handleWs(sock: WebSocket) {
       if (typeof ev === "string") {
         // text message.
         const msg = JSON.parse(ev) as Message
-        if (!msg.r || !msg.t){
+        if (msg.t !== MessageType.REQUEST_RANGE && msg.t !== MessageType.PARTICIPANT_MOUSE){ console.log('ws:', ev); }
+        if (!msg.t){
           console.error(`Invalid message: ${ev}`)
         }
-        //  if (msg.t !== MessageType.REQUEST_RANGE){ console.log('ws:', ev); }
-        const room = rooms.get(msg.r)
+
+        //  prepare participant and room
+        let participant:ParticipantStore
+        let room:RoomStore
+        if (msg.r && msg.p){
+          //  create room and participant
+          room = rooms.get(msg.r)
+          participant = room.getParticipant(msg.p, sock)
+          rooms.sockMap.set(sock, {room, participant})
+        }else{
+          const rp = rooms.sockMap.get(sock)!
+          room = rp.room
+          participant = rp.participant
+        }
+
+        //  call handler
         const handler = messageHandlers.get(msg.t)
         if (handler){
-          handler(msg, room, sock)
+          handler(msg, participant, room)
         }else{
           console.error(`No message handler for ${msg.t} - ${ev}`)
         }
-
       } else if (ev instanceof Uint8Array) {
         // binary message.
         console.log("ws:Binary", ev);
