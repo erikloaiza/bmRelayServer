@@ -30,6 +30,7 @@ export class ParticipantStore {
   socket:WebSocket
   //  participant related
   pose?: Pose2DMap
+  onStage = false
   storedMessages = new Map<string, Message>()   //  key=type
   participantStates = new Map<string, ParticipantState>() //  key=type
   timeSentStates = new Map<string, number>()  //  key=pid, value=timestamp

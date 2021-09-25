@@ -6,7 +6,7 @@ import {BMMessage as Message} from './BMMessage.ts'
 import {extractSharedContentInfo, ISharedContent, isEqualSharedContentInfo} from './ISharedContent.ts'
 import {MessageType, InstantMessageType, StoredMessageType, InstantMessageKeys, StoredMessageKeys, 
   ParticipantMessageType, ParticipantMessageKeys} from './MessageType.ts'
-import {getRect, isOverlapped, isInRect, str2Mouse, str2Pose} from './coordinates.ts'
+import {getRect, isOverlapped, isOverlappedToCircle, isInRect, isInCircle, str2Mouse, str2Pose} from './coordinates.ts'
 
 import {messageHandlers, rooms, RoomStore, ParticipantStore} from './Stores.ts'
 
@@ -48,6 +48,10 @@ messageHandlers.set(MessageType.PARTICIPANT_POSE, (msg, from) => {
   from.pose = str2Pose(JSON.parse(msg.v))
   from.participantStates.set(msg.t, {type:msg.t, value:msg.v, updateTime:Date.now()})
 })
+messageHandlers.set(MessageType.PARTICIPANT_ON_STAGE, (msg, from) => {
+  from.onStage = JSON.parse(msg.v)
+  from.participantStates.set(msg.t, {type:msg.t, value:msg.v, updateTime:Date.now()})
+})
 messageHandlers.set(MessageType.PARTICIPANT_MOUSE, (msg, from) => {
   from.mousePos = str2Mouse(JSON.parse(msg.v)).position
   from.mouseMessageValue = msg.v
@@ -60,11 +64,14 @@ messageHandlers.set(MessageType.REQUEST_ALL, (_msg, from, room) => {
 })
 
 messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
-  const range = JSON.parse(msg.v) as number[]
+  const ranges = JSON.parse(msg.v) as number[][]
+  const visible = ranges[0]
+  const audible = ranges[1]
 
     //  Find participant states updated and in the range
     {
-    const overlaps = room.participants.filter(p => p.pose && isInRect(p.pose.position, range))
+    const overlaps = room.participants.filter(p => p.onStage 
+      || (p.pose && (isInRect(p.pose.position, visible) || isInCircle(p.pose.position, audible))))
     const lastAndNow = [... new Set(overlaps.concat(from.overlappedParticipants))]
     if (lastAndNow.length !== overlaps.length){
       console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
@@ -74,7 +81,7 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
   }
   //  Check mouse is in the range and updated
   {
-    const overlaps = room.participants.filter(p => p.mousePos && isInRect(p.mousePos, range))
+    const overlaps = room.participants.filter(p => p.mousePos && isInRect(p.mousePos, visible))
     const lastAndNow = [... new Set(overlaps.concat(from.overlappedMouses))]
     if (lastAndNow.length !== overlaps.length){
       console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
@@ -91,7 +98,10 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
 
   //  Find contents updated and in the range.
   const contents = Array.from(room.contents.values())
-  const overlaps = contents.filter(c => isOverlapped(getRect(c.content.pose, c.content.size), range))
+  const overlaps = contents.filter(c => {
+    const rect = getRect(c.content.pose, c.content.size)
+    return isOverlapped(rect, visible) || isOverlappedToCircle(rect, audible)
+  })
   const lastAndNow = [... new Set(overlaps.concat(from.overlappedContents))]
   if (lastAndNow.length !== overlaps.length){
     console.log(`RANGE overlap:${overlaps.map(c=>c.content.id)} lastAndNow:${lastAndNow.map(c=>c.content.id)}`)
