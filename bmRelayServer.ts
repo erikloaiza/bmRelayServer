@@ -74,7 +74,7 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
       || (p.pose && (isInRect(p.pose.position, visible) || isInCircle(p.pose.position, audible))))
     const lastAndNow = [... new Set(overlaps.concat(from.overlappedParticipants))]
     if (lastAndNow.length !== overlaps.length){
-      console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
+      //console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
     }
     from.overlappedParticipants = overlaps
     for (const p of lastAndNow) { from.pushStatesOf(p) }
@@ -84,7 +84,7 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
     const overlaps = room.participants.filter(p => p.mousePos && isInRect(p.mousePos, visible))
     const lastAndNow = [... new Set(overlaps.concat(from.overlappedMouses))]
     if (lastAndNow.length !== overlaps.length){
-      console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
+      //console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
     }
     from.overlappedMouses = overlaps
     for (const p of lastAndNow) {
@@ -104,7 +104,7 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
   })
   const lastAndNow = [... new Set(overlaps.concat(from.overlappedContents))]
   if (lastAndNow.length !== overlaps.length){
-    console.log(`RANGE overlap:${overlaps.map(c=>c.content.id)} lastAndNow:${lastAndNow.map(c=>c.content.id)}`)
+    //console.log(`RANGE overlap:${overlaps.map(c=>c.content.id)} lastAndNow:${lastAndNow.map(c=>c.content.id)}`)
   }
   from.overlappedContents = overlaps
   const contentsToSend = lastAndNow.filter(c => {
@@ -185,12 +185,12 @@ messageHandlers.set(MessageType.REQUEST_TO, (msg, from, room) => {
       if (to.storedMessages.has(MessageType.PARTICIPANT_INFO)){
         to.storedMessages.forEach(stored => from.pushOrUpdateMessage(stored))
         from.pushStatesOf(to)
-        console.log(`Info for ${to.id} found and sent to ${from.id}.`)
+        //console.log(`Info for ${to.id} found and sent to ${from.id}.`)
       }else{
         const len = to.messagesTo.length
         to.pushOrUpdateMessage(msg)
         if (len != to.messagesTo.length){
-          console.log(`Info for ${to.id} not found and a request has sent.`)
+          //console.log(`Info for ${to.id} not found and a request has sent.`)
         }
       }
     }
@@ -203,7 +203,7 @@ messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
   if (participant){
     participant.socket.close(1000, 'closed by PARTICIPANT_LEFT message.')
     room.onParticipantLeft(participant)
-    console.log(`participant ${msg.p} left. ${room.participants.length} remain.`)
+    //console.log(`participant ${msg.p} left. ${room.participants.length} remain.`)
   }else{
     //  console.error(`PARTICIPANT_LEFT can not find pid=${msg.p}`)
   }
@@ -301,7 +301,7 @@ async function handleWs(sock: WebSocket) {
           }
         }
         if (code!==0 || reason !== 'left'){
-          console.log(`websocket close. code:${code}, reason:${reason}`)
+          //console.log(`websocket close. code:${code}, reason:${reason}`)
         }
       }
     }
