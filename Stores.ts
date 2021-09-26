@@ -113,16 +113,19 @@ export class RoomStore {
     this.participantsMap.delete(participant.id)
     const idx = this.participants.findIndex(p => p === participant)
     this.participants.splice(idx, 1)
-    if (this.participantsMap.size === 0){
-      this.contents.forEach(c => {
-        if (!isContentWallpaper(c.content)){ this.contents.delete(c.content.id) }
-      })
-    }
     for(const remain of this.participants){
       const idx = remain.overlappedParticipants.findIndex(p => p === participant)
       if (idx >= 0){ remain.overlappedParticipants.splice(idx, 1) }
       const idx2 = remain.overlappedMouses.findIndex(p => p === participant)
       if (idx2 >= 0){ remain.overlappedMouses.splice(idx2, 1) }
+    }
+    if (this.participantsMap.size === 0){
+      if (this.participants.length){
+        console.error(`Participants ${this.participants.map(p => p.id)} remains.`)
+      }
+      this.contents.forEach(c => {
+        if (!isContentWallpaper(c.content)){ this.contents.delete(c.content.id) }
+      })
     }
   }
 
