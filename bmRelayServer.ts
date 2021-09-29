@@ -57,10 +57,26 @@ messageHandlers.set(MessageType.PARTICIPANT_MOUSE, (msg, from) => {
   from.mouseMessageValue = msg.v
   from.mouseUpdateTime = Date.now()
 })
+
+messageHandlers.set(MessageType.ROOM_PROP, (msg, from, room) => {
+  const [key, val] = JSON.parse(msg.v) as [string, string|undefined]
+  if (val === undefined){
+    room.properties.delete(key)
+  }else{
+    room.properties.set(key, val)
+  }
+  const remotes = Array.from(room.participants.values()).filter(remote => remote.id !== msg.p)
+  remotes.forEach(remote => remote.messagesTo.push(msg))
+})
+
 messageHandlers.set(MessageType.REQUEST_ALL, (_msg, from, room) => {
   room.participants.forEach(remote => {
     remote.storedMessages.forEach(msg => from.pushOrUpdateMessage(msg))
   })
+  room.properties.forEach((val, key) => {
+    from.messagesTo.push({t:MessageType.ROOM_PROP, v:JSON.stringify([key, val])})
+  })
+  from.sendMessages()
 })
 
 messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
@@ -123,7 +139,7 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
   //if (overlaps.length){ console.log(`REQUEST_RANGE overlap:${overlaps.length} send:${contentsToSend.length}`) }
   if (contentsToSend.length){
     const msgToSend = {r:room.id, t:MessageType.CONTENT_UPDATE_REQUEST, p:'', d:'', v:JSON.stringify(contentsToSend)}
-    from.pushOrUpdateMessage(msgToSend)  
+    from.pushOrUpdateMessage(msgToSend)
     //  console.log(`Contents ${contentsToSend.map(c=>c.id)} sent.`)  
   }
 
@@ -200,7 +216,7 @@ messageHandlers.set(MessageType.REQUEST_TO, (msg, from, room) => {
 messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
   const pid = JSON.parse(msg.v) as string
   const participant = pid ? room.participantsMap.get(pid) : from
-  if (participant){
+  if (participant && !participant.socket.isClosed){
     participant.socket.close(1000, 'closed by PARTICIPANT_LEFT message.')
     room.onParticipantLeft(participant)
     //console.log(`participant ${msg.p} left. ${room.participants.length} remain.`)
