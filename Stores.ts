@@ -1,7 +1,8 @@
 import {ISharedContent, SharedContentInfo, isContentWallpaper} from './ISharedContent.ts'
 import {Pose2DMap} from './coordinates.ts'
-import {BMMessage as Message} from './BMMessage.ts'
+import {BMMessage as Message, ObjectArrayMessage} from './BMMessage.ts'
 import {WebSocket} from "https://deno.land/std/ws/mod.ts"
+import {ObjectArrayMessageTypeKeys, StringArrayMessageTypeKeys} from './MessageType.ts'
 
 export interface ParticipantSent{
   participant: ParticipantStore,
@@ -54,8 +55,37 @@ export class ParticipantStore {
   pushOrUpdateMessage(msg: Message){
     const found = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
     if (found >= 0){
-      this.messagesTo[found] = msg  //  update
+      //  same message type is already in the queue (messagesTo).
+      if (ObjectArrayMessageTypeKeys.has(msg.t)){
+        //  Merge new messages to existing one.
+        const values = JSON.parse(this.messagesTo[found].v) as ObjectArrayMessage[]
+        const toAdds = JSON.parse(msg.v) as ObjectArrayMessage[]
+        for (const toAdd of toAdds){
+          const idx = values.findIndex(v => v.id === toAdd.id)
+          if (idx >= 0){
+            values[idx] = toAdd
+          }else{
+            values.push(toAdd)
+          }         
+        }
+      }else if(StringArrayMessageTypeKeys.has(msg.t)){
+        //  Merge new messages to existing one.
+        const values = JSON.parse(this.messagesTo[found].v) as string[]
+        const toAdds = JSON.parse(msg.v) as string[]
+        for (const toAdd of toAdds){
+          const idx = values.findIndex(v => v === toAdd)
+          if (idx >= 0){
+            values[idx] = toAdd
+          }else{
+            values.push(toAdd)
+          }
+        }
+      }else{
+        //  Replace existing message by new one.
+        this.messagesTo[found] = msg  //  update
+      }
     }else{
+      //  add new message.
       this.messagesTo.push(msg)     //  push
     } 
   }

@@ -45,7 +45,9 @@ for(const key in ParticipantMessageType){
 
 messageHandlers.set(MessageType.PARTICIPANT_POSE, (msg, from) => {
   //  console.log(`str2Pose(${msg.v}) = ${JSON.stringify(str2Pose(JSON.parse(msg.v)))}`)
+  //  set pose
   from.pose = str2Pose(JSON.parse(msg.v))
+  //  also set the message as one of the state of the participant.
   from.participantStates.set(msg.t, {type:msg.t, value:msg.v, updateTime:Date.now()})
 })
 messageHandlers.set(MessageType.PARTICIPANT_ON_STAGE, (msg, from) => {
@@ -84,24 +86,25 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
   const visible = ranges[0]
   const audible = ranges[1]
 
-    //  Find participant states updated and in the range
-    {
+  //  Find participant states which are updated and in the range.
+  {
     const overlaps = room.participants.filter(p => p.onStage 
       || (p.pose && (isInRect(p.pose.position, visible) || isInCircle(p.pose.position, audible))))
     const lastAndNow = [... new Set(overlaps.concat(from.overlappedParticipants))]
-    if (lastAndNow.length !== overlaps.length){
-      //console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
-    }
+    //if (lastAndNow.length !== overlaps.length){
+    //  console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
+    //}
     from.overlappedParticipants = overlaps
     for (const p of lastAndNow) { from.pushStatesOf(p) }
   }
+
   //  Check mouse is in the range and updated
   {
     const overlaps = room.participants.filter(p => p.mousePos && isInRect(p.mousePos, visible))
     const lastAndNow = [... new Set(overlaps.concat(from.overlappedMouses))]
-    if (lastAndNow.length !== overlaps.length){
-      //console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
-    }
+    //if (lastAndNow.length !== overlaps.length){
+    //  console.log(`RANGE participant overlap:${overlaps.map(p=>p.id)} lastAndNow:${lastAndNow.map(p=>p.id)}`)
+    //}
     from.overlappedMouses = overlaps
     for (const p of lastAndNow) {
       const sentTime = from.timeSentMouse.get(p.id)
@@ -119,9 +122,9 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
     return isOverlapped(rect, visible) || isOverlappedToCircle(rect, audible)
   })
   const lastAndNow = [... new Set(overlaps.concat(from.overlappedContents))]
-  if (lastAndNow.length !== overlaps.length){
-    //console.log(`RANGE overlap:${overlaps.map(c=>c.content.id)} lastAndNow:${lastAndNow.map(c=>c.content.id)}`)
-  }
+  //if (lastAndNow.length !== overlaps.length){
+  //  console.log(`RANGE overlap:${overlaps.map(c=>c.content.id)} lastAndNow:${lastAndNow.map(c=>c.content.id)}`)
+  //}
   from.overlappedContents = overlaps
   const contentsToSend = lastAndNow.filter(c => {
     const sent = from.contentsSent.get(c.content.id)
@@ -138,7 +141,7 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
   }).map(c => c.content)
   //if (overlaps.length){ console.log(`REQUEST_RANGE overlap:${overlaps.length} send:${contentsToSend.length}`) }
   if (contentsToSend.length){
-    const msgToSend = {r:room.id, t:MessageType.CONTENT_UPDATE_REQUEST, p:'', d:'', v:JSON.stringify(contentsToSend)}
+    const msgToSend = {t:MessageType.CONTENT_UPDATE_REQUEST, v:JSON.stringify(contentsToSend)}
     from.pushOrUpdateMessage(msgToSend)
     //  console.log(`Contents ${contentsToSend.map(c=>c.id)} sent.`)  
   }
@@ -158,7 +161,7 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
     return true
   }).map(c => extractSharedContentInfo(c.content))
   if (contentsInfoToSend.length){
-    const msgToSend = {r:room.id, t:MessageType.CONTENT_INFO_UPDATE, p:'', d:'', v:JSON.stringify(contentsInfoToSend)}
+    const msgToSend = {t:MessageType.CONTENT_INFO_UPDATE, v:JSON.stringify(contentsInfoToSend)}
     from.pushOrUpdateMessage(msgToSend)
     //  console.log(`Contents info ${contentsInfoToSend.map(c=>c.id)} sent.`)
   }
