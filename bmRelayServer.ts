@@ -143,9 +143,6 @@ function pushContentsInRangeOrMovedOut(contents:Content[], from:ParticipantStore
     if (!overlapIds.has(sent.content.content.id)) {
       const rect = getRect(sent.pose, sent.size)
       if (isOverlapped(rect, visible) || isOverlappedToCircle(rect, audible)){
-        //  send new position
-        //  updateContentSent(sent)
-        //  contentsToSend.push(sent.content.content)
         //  range out and remove from sent
         from.contentsSent.delete(sent.content)
         contentsRangeout.push(sent.content.content.id)
@@ -262,7 +259,7 @@ messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
   }
 })
 
-messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, _participant, room) => {
+messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, from, room) => {
   const cs = JSON.parse(msg.v) as ISharedContent[]
   const time = Date.now()
   for(const newContent of cs){
@@ -276,10 +273,9 @@ messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, _participant, room
       c = {content:newContent, timeUpdate: time, timeUpdateInfo: time}
       room.contents.set(c.content.id, c)
     }
-    //  The sender also receive content
-    ////  The sender should not receive the update. 
-    //participant.contentsSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdate})
-    //participant.contentsInfoSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdateInfo})
+    //  The sender should not receive the update. 
+    from.contentsSent.set(c, createContentSent(c))
+    from.contentsInfoSent.set(c, {content:c.content, timeSent: c.timeUpdateInfo})
   }
   //  console.log(`Contents update ${cs.map(c=>c.id)} at ${time}`)
 })
