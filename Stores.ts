@@ -1,22 +1,62 @@
 import {ISharedContent, SharedContentInfo, isContentWallpaper} from './ISharedContent.ts'
-import {Pose2DMap} from './coordinates.ts'
+import {Pose2DMap, clonePose2DMap, cloneV2} from './coordinates.ts'
 import {BMMessage as Message, ObjectArrayMessage} from './BMMessage.ts'
+import {MessageType} from './MessageType.ts'
 import {WebSocket} from "https://deno.land/std/ws/mod.ts"
 import {ObjectArrayMessageTypeKeys, StringArrayMessageTypeKeys} from './MessageType.ts'
 
-export interface ParticipantSent{
-  participant: ParticipantStore,
-  timestamp: number 
-}
 export interface Content{
   content: ISharedContent,
   timeUpdate: number,
   timeUpdateInfo: number 
 }
-export interface ContentSent{
-  content: ISharedContent,
+export interface ParticipantSent{
+  participant: ParticipantStore,
   timeSent: number 
+  position: [number, number]
 }
+function createParticipantSent(p: ParticipantStore, timeSent: number): ParticipantSent|undefined{
+  if (!p.pose){
+    console.error(`Participant ${p.id} does not have pose.`)
+    return
+  }else{
+    return {
+      participant: p,
+      timeSent,
+      position: cloneV2(p.pose.position)
+    }  
+  }
+}
+function updateParticipantSent(sent: ParticipantSent, updateTime: number){
+  if (sent.participant.pose){
+    sent.position = cloneV2(sent.participant.pose.position)
+    sent.timeSent = updateTime 
+  }else{
+    console.error(`No pose for ${sent.participant.id} in updateParticipantSent().`)
+  }
+}
+
+export interface ContentSent{
+  content: Content,
+  timeSent: number
+  pose: Pose2DMap
+  size: [number, number] 
+}
+export function updateContentSent(sent: ContentSent){
+  if (sent.timeSent < sent.content.timeUpdate){
+    sent.timeSent = sent.content.timeUpdate
+    sent.pose = clonePose2DMap(sent.content.content.pose)
+    sent.size = cloneV2(sent.content.content.size)
+    return true
+  }else{
+    return false
+  }
+}
+export function createContentSent(c: Content):ContentSent{
+  return {content:c, timeSent:c.timeUpdate, 
+    pose:clonePose2DMap(c.content.pose), size:cloneV2(c.content.size)}
+}
+
 export interface ContentInfoSent{
   content: SharedContentInfo,
   timeSent: number 
@@ -30,26 +70,25 @@ export class ParticipantStore {
   id: string
   socket:WebSocket
   //  participant related
-  pose?: Pose2DMap
   onStage = false
   storedMessages = new Map<string, Message>()   //  key=type
   participantStates = new Map<string, ParticipantState>() //  key=type
-  timeSentStates = new Map<string, number>()  //  key=pid, value=timestamp
-  messagesTo:Message[] = []                   //
+  timeSentStates = new Map<string, number>()
+  messagesTo:Message[] = []                     //
+
+  //  participant related
+  pose?: Pose2DMap
   participantsSent:Map<string, ParticipantSent> = new Map()
-  overlappedParticipants:ParticipantStore[] = []
 
   //  mouse related
+  mouseMessageValue?: string
   mousePos?: [number,number]
   mouseUpdateTime = 0
-  overlappedMouses: ParticipantStore[] = []
-  timeSentMouse = new Map<string, number>()  //  key=pid, value=timestamp
-  mouseMessageValue?: string
+  mousesSent:Map<string, ParticipantSent> = new Map()
 
   //  contents related
   contentsSent:Map<string, ContentSent> = new Map()
   contentsInfoSent:Map<string, ContentInfoSent> = new Map()
-  overlappedContents:Content[] = []
 
   //  add message to send
   pushOrUpdateMessage(msg: Message){
@@ -90,23 +129,21 @@ export class ParticipantStore {
     } 
   }
   
-  sendMessages(){
-    if (this.messagesTo.length){
-      try{
-        if (!this.socket.isClosed){
-          this.socket.send(JSON.stringify(this.messagesTo))
-        }
+  sendMessages(){ //  Client wait response of the server. Server must always send packet.
+    try{
+      if (!this.socket.isClosed){
+        this.socket.send(JSON.stringify(this.messagesTo))
       }
-      catch(e){
-        console.error(e)
-      }
-      this.messagesTo = []
-      //console.log(`${this.messagesTo.length} msg sent to ${this.id} v:${JSON.stringify(this.messagesTo)}`)
     }
+    catch(e){
+      console.error(e)
+    }
+    this.messagesTo = []
   }
   //  Push states of a participant to send to this participant.
-  pushStatesOf(p: ParticipantStore){
-    const sentTime = this.timeSentStates.get(p.id)
+  pushStatesToSend(p: ParticipantStore){
+    const sent = this.participantsSent.get(p.id)
+    const sentTime = sent?.timeSent
     let latest = sentTime ? sentTime : 0
     p.participantStates.forEach((s, mt) => {
       if (!sentTime || s.updateTime > sentTime){
@@ -114,9 +151,38 @@ export class ParticipantStore {
         latest = Math.max(latest, s.updateTime)
       }
     })
-    this.timeSentStates.set(p.id, latest)
+    if (sent) {
+      updateParticipantSent(sent, latest)
+    }else{
+      const newSent = createParticipantSent(p, latest)
+      if (newSent){ this.participantsSent.set(p.id, newSent) }
+    }
   }
-  
+  pushPositionToSend(sent:ParticipantSent){
+    if (sent.participant.pose){
+      sent.position = cloneV2(sent.participant.pose.position)
+      const poseState = sent.participant.participantStates.get(MessageType.PARTICIPANT_POSE)
+      if (poseState){
+        this.pushOrUpdateMessage({t:MessageType.PARTICIPANT_POSE, v:poseState.value, p:sent.participant.id})
+      }  
+    }
+  }
+  pushMouseToSend(p:ParticipantStore, sent?:ParticipantSent){
+    if (p.mousePos){
+      if (!sent){ sent = this.mousesSent.get(p.id) }
+      if (sent){
+        sent.position = cloneV2(p.mousePos)
+      }else{
+        sent = {timeSent:p.mouseUpdateTime, position:cloneV2(p.mousePos),  participant:p}
+        this.mousesSent.set(p.id, sent)
+      }
+      const mouseState = sent.participant.participantStates.get(MessageType.PARTICIPANT_MOUSE)
+      if (mouseState){
+        this.pushOrUpdateMessage({t:MessageType.PARTICIPANT_MOUSE, v:mouseState.value, p:sent.participant.id})
+      }
+    }
+  }
+
   constructor(id:string, socket:WebSocket){
     this.id = id
     this.socket = socket
@@ -143,12 +209,6 @@ export class RoomStore {
     this.participantsMap.delete(participant.id)
     const idx = this.participants.findIndex(p => p === participant)
     this.participants.splice(idx, 1)
-    for(const remain of this.participants){
-      const idx = remain.overlappedParticipants.findIndex(p => p === participant)
-      if (idx >= 0){ remain.overlappedParticipants.splice(idx, 1) }
-      const idx2 = remain.overlappedMouses.findIndex(p => p === participant)
-      if (idx2 >= 0){ remain.overlappedMouses.splice(idx2, 1) }
-    }
     if (this.participantsMap.size === 0){
       if (this.participants.length){
         console.error(`Participants ${this.participants.map(p => p.id)} remains.`)
