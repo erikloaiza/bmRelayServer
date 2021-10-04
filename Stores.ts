@@ -78,17 +78,17 @@ export class ParticipantStore {
 
   //  participant related
   pose?: Pose2DMap
-  participantsSent:Map<string, ParticipantSent> = new Map()
+  participantsSent:Map<ParticipantStore, ParticipantSent> = new Map()
 
   //  mouse related
   mouseMessageValue?: string
   mousePos?: [number,number]
   mouseUpdateTime = 0
-  mousesSent:Map<string, ParticipantSent> = new Map()
+  mousesSent:Map<ParticipantStore, ParticipantSent> = new Map()
 
   //  contents related
-  contentsSent:Map<string, ContentSent> = new Map()
-  contentsInfoSent:Map<string, ContentInfoSent> = new Map()
+  contentsSent:Map<Content, ContentSent> = new Map()
+  contentsInfoSent:Map<Content, ContentInfoSent> = new Map()
 
   //  add message to send
   pushOrUpdateMessage(msg: Message){
@@ -142,7 +142,7 @@ export class ParticipantStore {
   }
   //  Push states of a participant to send to this participant.
   pushStatesToSend(p: ParticipantStore){
-    const sent = this.participantsSent.get(p.id)
+    const sent = this.participantsSent.get(p)
     const sentTime = sent?.timeSent
     let latest = sentTime ? sentTime : 0
     p.participantStates.forEach((s, mt) => {
@@ -155,9 +155,10 @@ export class ParticipantStore {
       updateParticipantSent(sent, latest)
     }else{
       const newSent = createParticipantSent(p, latest)
-      if (newSent){ this.participantsSent.set(p.id, newSent) }
+      if (newSent){ this.participantsSent.set(p, newSent) }
     }
   }
+  /*
   pushPositionToSend(sent:ParticipantSent){
     if (sent.participant.pose){
       sent.position = cloneV2(sent.participant.pose.position)
@@ -167,14 +168,15 @@ export class ParticipantStore {
       }  
     }
   }
+  */
   pushMouseToSend(p:ParticipantStore, sent?:ParticipantSent){
     if (p.mousePos){
-      if (!sent){ sent = this.mousesSent.get(p.id) }
+      if (!sent){ sent = this.mousesSent.get(p) }
       if (sent){
         sent.position = cloneV2(p.mousePos)
       }else{
         sent = {timeSent:p.mouseUpdateTime, position:cloneV2(p.mousePos),  participant:p}
-        this.mousesSent.set(p.id, sent)
+        this.mousesSent.set(p, sent)
       }
       const mouseState = sent.participant.participantStates.get(MessageType.PARTICIPANT_MOUSE)
       if (mouseState){

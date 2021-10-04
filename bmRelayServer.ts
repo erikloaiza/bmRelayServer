@@ -89,14 +89,17 @@ function pushParticipantsInRangeOrMovedOut(from:ParticipantStore, room:RoomStore
 
   //  Push participants, who was in the range but moved out later.
   const overlapPSs = new Set(overlaps)
+  const pidsOut:string[] =[] 
   from.participantsSent.forEach(sent => {
     if (!overlapPSs.has(sent.participant)) {
       if (isInRect(sent.position, visible) || isInCircle(sent.position, audible)){
-        console.log(`Out call pushPositionToSend(${sent.participant.id})`)
-        from.pushPositionToSend(sent)
+        //  console.log(`Out call pushPositionToSend(${sent.participant.id})`)
+        from.participantsSent.delete(sent.participant)
+        pidsOut.push(sent.participant.id)
       }
     }
   })
+  from.pushOrUpdateMessage({t:MessageType.PARTICIPANT_OUT, v:JSON.stringify(pidsOut)})
 }
 
 function pushMousesInRangeOrMovedOut(from:ParticipantStore, room:RoomStore, visible:number[], audible:number[]){
@@ -107,13 +110,16 @@ function pushMousesInRangeOrMovedOut(from:ParticipantStore, room:RoomStore, visi
 
   //  Push mouses, who was in the range but moved out later.
   const overlapPSs = new Set(overlaps)
+  const pidsOut:string[] = []
   from.mousesSent.forEach(sent => {
     if (!overlapPSs.has(sent.participant)) {
       if (isInRect(sent.position, visible) || isInCircle(sent.position, audible)){
-        from.pushMouseToSend(sent.participant, sent)
+        from.mousesSent.delete(sent.participant)
+        pidsOut.push(sent.participant.id)
       }
     }
   })
+  from.pushOrUpdateMessage({t:MessageType.MOUSE_OUT, v:JSON.stringify(pidsOut)})
 }
 
 
@@ -124,26 +130,36 @@ function pushContentsInRangeOrMovedOut(contents:Content[], from:ParticipantStore
     return isOverlapped(rect, visible) || isOverlappedToCircle(rect, audible)
   })
   const contentsToSend = overlaps.filter(c => {
-    const sent = from.contentsSent.get(c.content.id)
+    const sent = from.contentsSent.get(c)
     if (sent){ return updateContentSent(sent) }
-    from.contentsSent.set(c.content.id, createContentSent(c))
+    from.contentsSent.set(c, createContentSent(c))
     return true
   }).map(c => c.content)
 
   //  Push contents, who was in the range but moved out later, to contentsToSend.
   const overlapIds = new Set(overlaps.map(c => c.content.id))
+  const contentsRangeout:string[] = []
   from.contentsSent.forEach(sent => {
     if (!overlapIds.has(sent.content.content.id)) {
       const rect = getRect(sent.pose, sent.size)
       if (isOverlapped(rect, visible) || isOverlappedToCircle(rect, audible)){
-        updateContentSent(sent)
-        contentsToSend.push(sent.content.content)
+        //  send new position
+        //  updateContentSent(sent)
+        //  contentsToSend.push(sent.content.content)
+        //  range out and remove from sent
+        from.contentsSent.delete(sent.content)
+        contentsRangeout.push(sent.content.content.id)
       }  
     }
   })
 
   if (contentsToSend.length){
     const msgToSend = {t:MessageType.CONTENT_UPDATE_REQUEST, v:JSON.stringify(contentsToSend)}
+    from.pushOrUpdateMessage(msgToSend)
+    //  console.log(`Contents ${contentsToSend.map(c=>c.id)} sent.`)  
+  }
+  if (contentsRangeout.length){
+    const msgToSend = {t:MessageType.CONTENT_OUT, v:JSON.stringify(contentsRangeout)}
     from.pushOrUpdateMessage(msgToSend)
     //  console.log(`Contents ${contentsToSend.map(c=>c.id)} sent.`)  
   }
@@ -161,7 +177,7 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
 
   //  Find contentsInfo updated.
   const contentsInfoToSend = contents.filter(c => {
-    const sent = from.contentsInfoSent.get(c.content.id)
+    const sent = from.contentsInfoSent.get(c)
     if (sent){
       if (sent.timeSent < c.timeUpdateInfo){
         sent.timeSent = c.timeUpdateInfo
@@ -170,7 +186,7 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
         return false
       }
     }
-    from.contentsInfoSent.set(c.content.id, {content:c.content, timeSent: c.timeUpdateInfo})
+    from.contentsInfoSent.set(c, {content:c.content, timeSent: c.timeUpdateInfo})
     return true
   }).map(c => extractSharedContentInfo(c.content))
   if (contentsInfoToSend.length){
@@ -198,7 +214,12 @@ messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST_BY_ID, (msg, from, room)=
     const c = room.contents.get(cid)
     if (c) {
       cs.push(c.content)
-      from.contentsSent.set(c.content.id, createContentSent(c))
+      const sent = from.contentsSent.get(c)
+      if (sent){
+        updateContentSent(sent)
+      }else{
+        from.contentsSent.set(c, createContentSent(c))
+      }
     }
   }
   msg.v = JSON.stringify(cs)
@@ -266,15 +287,20 @@ messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, _participant, room
 messageHandlers.set(MessageType.CONTENT_REMOVE_REQUEST, (msg, _participant, room) => {
   const cids = JSON.parse(msg.v) as string[]
   //   delete contents
+  const contents:Content[] = []
   for(const cid of cids){
-    room.contents.delete(cid)
+    const c = room.contents.get(cid)
+    if (c){
+      contents.push(c)
+      room.contents.delete(cid)
+    }
   }
   //  forward remove request to all remote participants
   const remotes = Array.from(room.participants.values()).filter(participant => participant.id !== msg.p)
   remotes.forEach(remote => {
-    for(const cid of cids){
-      remote.contentsSent.delete(cid)
-      remote.contentsInfoSent.delete(cid)
+    for(const c of contents){
+      remote.contentsSent.delete(c)
+      remote.contentsInfoSent.delete(c)
     }
     remote.pushOrUpdateMessage(msg)    
   })
