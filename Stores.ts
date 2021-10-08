@@ -170,7 +170,7 @@ export class ParticipantStore {
   }
   */
   pushMouseToSend(p:ParticipantStore, sent?:ParticipantSent){
-    if (p.mousePos){
+    if (p.mousePos && p.mouseMessageValue){
       if (!sent){ sent = this.mousesSent.get(p) }
       if (sent){
         sent.position = cloneV2(p.mousePos)
@@ -178,10 +178,7 @@ export class ParticipantStore {
         sent = {timeSent:p.mouseUpdateTime, position:cloneV2(p.mousePos),  participant:p}
         this.mousesSent.set(p, sent)
       }
-      const mouseState = sent.participant.participantStates.get(MessageType.PARTICIPANT_MOUSE)
-      if (mouseState){
-        this.pushOrUpdateMessage({t:MessageType.PARTICIPANT_MOUSE, v:mouseState.value, p:sent.participant.id})
-      }
+      this.pushOrUpdateMessage({t:MessageType.PARTICIPANT_MOUSE, v:p.mouseMessageValue, p:sent.participant.id})
     }
   }
 
