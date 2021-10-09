@@ -153,7 +153,7 @@ function pushContentsInRangeOrMovedOut(contents:Content[], from:ParticipantStore
   if (contentsToSend.length){
     const msgToSend = {t:MessageType.CONTENT_UPDATE_REQUEST, v:JSON.stringify(contentsToSend)}
     from.pushOrUpdateMessage(msgToSend)
-    //  console.log(`Contents ${contentsToSend.map(c=>c.id)} sent.`)  
+    //console.log(`CONTENT_UPDATE_REQUEST for ${contentsToSend.map(c=>c.id)} received from ${from.id}.`) 
   }
   if (contentsRangeout.length){
     const msgToSend = {t:MessageType.CONTENT_OUT, v:JSON.stringify(contentsRangeout)}
