@@ -248,14 +248,17 @@ messageHandlers.set(MessageType.REQUEST_TO, (msg, from, room) => {
 })
 
 messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
-  const pid = JSON.parse(msg.v) as string
-  const participant = pid ? room.participantsMap.get(pid) : from
-  if (participant && !participant.socket.isClosed){
-    participant.socket.close(1000, 'closed by PARTICIPANT_LEFT message.')
-    room.onParticipantLeft(participant)
-    //console.log(`participant ${msg.p} left. ${room.participants.length} remain.`)
-  }else{
-    //  console.error(`PARTICIPANT_LEFT can not find pid=${msg.p}`)
+  let pids = JSON.parse(msg.v) as string[]
+  if (!msg.v || pids === []){ pids = [from.id] }
+  for(const pid of pids){
+    const participant = room.participantsMap.get(pid)
+    if (participant && !participant.socket.isClosed){
+      participant.socket.close(1000, 'closed by PARTICIPANT_LEFT message.')
+      room.onParticipantLeft(participant)
+      //console.log(`participant ${msg.p} left. ${room.participants.length} remain.`)
+    }else{
+      //  console.error(`PARTICIPANT_LEFT can not find pid=${msg.p}`)
+    }  
   }
 })
 
@@ -307,32 +310,34 @@ async function handleWs(sock: WebSocket) {
     for await (const ev of sock) {
       if (typeof ev === "string") {
         // text message.
-        const msg = JSON.parse(ev) as Message
-        //  if (msg.t !== MessageType.REQUEST_RANGE && msg.t !== MessageType.PARTICIPANT_MOUSE){ console.log('ws:', ev); }
-        if (!msg.t){
-          console.error(`Invalid message: ${ev}`)
-        }
+        const msgs = JSON.parse(ev) as Message[]
+        for(const msg of msgs){
+          //  if (msg.t !== MessageType.REQUEST_RANGE && msg.t !== MessageType.PARTICIPANT_MOUSE){ console.log('ws:', ev); }
+          if (!msg.t){
+            console.error(`Invalid message: ${ev}`)
+          }
 
-        //  prepare participant and room
-        let participant:ParticipantStore
-        let room:RoomStore
-        if (msg.r && msg.p){
-          //  create room and participant
-          room = rooms.get(msg.r)
-          participant = room.getParticipant(msg.p, sock)
-          rooms.sockMap.set(sock, {room, participant})
-        }else{
-          const rp = rooms.sockMap.get(sock)!
-          room = rp.room
-          participant = rp.participant
-        }
+          //  prepare participant and room
+          let participant:ParticipantStore
+          let room:RoomStore
+          if (msg.r && msg.p){
+            //  create room and participant
+            room = rooms.get(msg.r)
+            participant = room.getParticipant(msg.p, sock)
+            rooms.sockMap.set(sock, {room, participant})
+          }else{
+            const rp = rooms.sockMap.get(sock)!
+            room = rp.room
+            participant = rp.participant
+          }
 
-        //  call handler
-        const handler = messageHandlers.get(msg.t)
-        if (handler){
-          handler(msg, participant, room)
-        }else{
-          console.error(`No message handler for ${msg.t} - ${ev}`)
+          //  call handler
+          const handler = messageHandlers.get(msg.t)
+          if (handler){
+            handler(msg, participant, room)
+          }else{
+            console.error(`No message handler for ${msg.t} - ${ev}`)
+          }
         }
       } else if (ev instanceof Uint8Array) {
         // binary message.

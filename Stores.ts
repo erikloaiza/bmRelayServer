@@ -3,7 +3,7 @@ import {Pose2DMap, clonePose2DMap, cloneV2} from './coordinates.ts'
 import {BMMessage as Message, ObjectArrayMessage} from './BMMessage.ts'
 import {MessageType} from './MessageType.ts'
 import {WebSocket} from "https://deno.land/std/ws/mod.ts"
-import {ObjectArrayMessageTypeKeys, StringArrayMessageTypeKeys} from './MessageType.ts'
+import {ObjectArrayMessageTypes, StringArrayMessageTypes} from './MessageType.ts'
 
 export interface Content{
   content: ISharedContent,
@@ -95,7 +95,7 @@ export class ParticipantStore {
     const found = this.messagesTo.findIndex(m => m.t === msg.t && m.p === msg.p)
     if (found >= 0){
       //  same message type is already in the queue (messagesTo).
-      if (ObjectArrayMessageTypeKeys.has(msg.t)){
+      if (ObjectArrayMessageTypes.has(msg.t)){
         //  Merge new messages to existing one.
         const values = JSON.parse(this.messagesTo[found].v) as ObjectArrayMessage[]
         const toAdds = JSON.parse(msg.v) as ObjectArrayMessage[]
@@ -107,7 +107,7 @@ export class ParticipantStore {
             values.push(toAdd)
           }         
         }
-      }else if(StringArrayMessageTypeKeys.has(msg.t)){
+      }else if(StringArrayMessageTypes.has(msg.t)){
         //  Merge new messages to existing one.
         const values = JSON.parse(this.messagesTo[found].v) as string[]
         const toAdds = JSON.parse(msg.v) as string[]
