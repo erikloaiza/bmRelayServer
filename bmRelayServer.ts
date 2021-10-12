@@ -30,8 +30,8 @@ function storedMessageHandler(msg: Message, from: ParticipantStore, room: RoomSt
   from.storedMessages.set(msg.t, msg)
   instantMessageHandler(msg, from, room)
 }
-function participantMessageHandler(msg: Message, from: ParticipantStore){
-  from.participantStates.set(msg.t, {type:msg.t, updateTime: Date.now(), value:msg.v})
+function participantMessageHandler(msg: Message, from: ParticipantStore, room: RoomStore){
+  from.participantStates.set(msg.t, {type:msg.t, updateTime: room.tick, value:msg.v})
 }
 for(const key in StoredMessageType){
   messageHandlers.set(StoredMessageType[key as StoredMessageKeys], storedMessageHandler)
@@ -43,21 +43,21 @@ for(const key in ParticipantMessageType){
   messageHandlers.set(ParticipantMessageType[key as ParticipantMessageKeys], participantMessageHandler)
 }
 
-messageHandlers.set(MessageType.PARTICIPANT_POSE, (msg, from) => {
+messageHandlers.set(MessageType.PARTICIPANT_POSE, (msg, from, room) => {
   //  console.log(`str2Pose(${msg.v}) = ${JSON.stringify(str2Pose(JSON.parse(msg.v)))}`)
   //  set pose
   from.pose = str2Pose(JSON.parse(msg.v))
   //  also set the message as one of the state of the participant.
-  from.participantStates.set(msg.t, {type:msg.t, value:msg.v, updateTime:Date.now()})
+  from.participantStates.set(msg.t, {type:msg.t, value:msg.v, updateTime:room.tick})
 })
-messageHandlers.set(MessageType.PARTICIPANT_ON_STAGE, (msg, from) => {
+messageHandlers.set(MessageType.PARTICIPANT_ON_STAGE, (msg, from, room) => {
   from.onStage = JSON.parse(msg.v)
-  from.participantStates.set(msg.t, {type:msg.t, value:msg.v, updateTime:Date.now()})
+  from.participantStates.set(msg.t, {type:msg.t, value:msg.v, updateTime:room.tick})
 })
-messageHandlers.set(MessageType.PARTICIPANT_MOUSE, (msg, from) => {
+messageHandlers.set(MessageType.PARTICIPANT_MOUSE, (msg, from, room) => {
   from.mousePos = str2Mouse(JSON.parse(msg.v)).position
   from.mouseMessageValue = msg.v
-  from.mouseUpdateTime = Date.now()
+  from.mouseUpdateTime = room.tick
 })
 
 messageHandlers.set(MessageType.ROOM_PROP, (msg, _from, room) => {
@@ -163,6 +163,7 @@ function pushContentsInRangeOrMovedOut(contents:Content[], from:ParticipantStore
 }
 
 messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
+  room.tick ++;
   const ranges = JSON.parse(msg.v) as number[][]
   const visible = ranges[0]
   const audible = ranges[1]
@@ -196,6 +197,7 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
 })
 
 messageHandlers.set(MessageType.REQUEST_PARTICIPANT_STATES, (msg, from, room)=> {
+  room.tick ++;
   const pids = JSON.parse(msg.v) as string[]
   for (const pid of pids) {
     const p = room.participantsMap.get(pid)
@@ -205,6 +207,7 @@ messageHandlers.set(MessageType.REQUEST_PARTICIPANT_STATES, (msg, from, room)=> 
 })
 
 messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST_BY_ID, (msg, from, room)=> {
+  room.tick ++;
   const cids = JSON.parse(msg.v) as string[]
   const cs:ISharedContent[] = []
   for (const cid of cids) {
@@ -225,6 +228,7 @@ messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST_BY_ID, (msg, from, room)=
 })
 
 messageHandlers.set(MessageType.REQUEST_TO, (msg, from, room) => {
+  room.tick ++;
   const pids = JSON.parse(msg.v) as string[]
   //console.log(`REQUEST_TO ${pids}`)
   msg.v = ''
@@ -264,7 +268,7 @@ messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
 
 messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, from, room) => {
   const cs = JSON.parse(msg.v) as ISharedContent[]
-  const time = Date.now()
+  const time = room.tick
   for(const newContent of cs){
     //  upate room's content
     let c = room.contents.get(newContent.id)

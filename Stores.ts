@@ -189,12 +189,17 @@ export class ParticipantStore {
 }
   
 export class RoomStore {
-  id: string  //  room id
+  id: string                                //  room id
+  tick = 1
+  participantsMap = new Map<string, ParticipantStore>()  //  key=source pid
+  participants:ParticipantStore[] = []
+  properties = new Map<string, string>()    //  room properties  
+  contents = new Map<string, Content>()     //  room contents
+
+
   constructor(roomId: string){
     this.id = roomId
   }
-  participantsMap = new Map<string, ParticipantStore>()  //  key=source pid
-  participants:ParticipantStore[] = []
 
   getParticipant(pid: string, sock: WebSocket){
     const found = this.participantsMap.get(pid)
@@ -217,12 +222,6 @@ export class RoomStore {
       })
     }
   }
-
-  //  room properties
-  properties = new Map<string, string>()
-  
-  //  room contents
-  contents = new Map<string, Content>()
 }
 
 export interface PandR{
