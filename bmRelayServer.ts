@@ -256,6 +256,7 @@ messageHandlers.set(MessageType.REQUEST_TO, (msg, from, room) => {
 })
 
 messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
+  //  console.log(`${JSON.stringify(msg)}`)
   let pids = JSON.parse(msg.v) as string[]
   if (!msg.v || pids === []){ pids = [from.id] }
   for(const pid of pids){
@@ -263,9 +264,13 @@ messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
     if (participant && !participant.socket.isClosed){
       participant.socket.close(1000, 'closed by PARTICIPANT_LEFT message.')
       room.onParticipantLeft(participant)
-      console.log(`participant ${msg.p} left. ${room.participants.length} remain.`)
+
+      //console.log(`states: ${JSON.stringify(Array.from(participant.participantStates.values()))}`)
+      const infoMsg = participant.storedMessages.get(MessageType.PARTICIPANT_INFO)
+      const name = infoMsg ? JSON.parse(infoMsg.v).name : ''
+      console.log(`Participant ${pid}:"${name}" left. ${room.participants.length} remain.`)
     }else{
-      //  console.error(`PARTICIPANT_LEFT can not find pid=${msg.p}`)
+      //  console.error(`PARTICIPANT_LEFT can not find pid=${pid}`)
     }  
   }
 })
