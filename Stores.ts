@@ -158,21 +158,11 @@ export class ParticipantStore {
       if (newSent){ this.participantsSent.set(p, newSent) }
     }
   }
-  /*
-  pushPositionToSend(sent:ParticipantSent){
-    if (sent.participant.pose){
-      sent.position = cloneV2(sent.participant.pose.position)
-      const poseState = sent.participant.participantStates.get(MessageType.PARTICIPANT_POSE)
-      if (poseState){
-        this.pushOrUpdateMessage({t:MessageType.PARTICIPANT_POSE, v:poseState.value, p:sent.participant.id})
-      }  
-    }
-  }
-  */
   pushMouseToSend(p:ParticipantStore, sent?:ParticipantSent){
     if (p.mousePos && p.mouseMessageValue){
       if (!sent){ sent = this.mousesSent.get(p) }
       if (sent){
+        sent.timeSent = p.mouseUpdateTime
         sent.position = cloneV2(p.mousePos)
       }else{
         sent = {timeSent:p.mouseUpdateTime, position:cloneV2(p.mousePos),  participant:p}

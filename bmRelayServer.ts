@@ -162,17 +162,7 @@ function pushContentsInRangeOrMovedOut(contents:Content[], from:ParticipantStore
   }
 }
 
-messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
-  room.tick ++;
-  const ranges = JSON.parse(msg.v) as number[][]
-  const visible = ranges[0]
-  const audible = ranges[1]
-
-  pushParticipantsInRangeOrMovedOut(from, room, visible, audible)
-  pushMousesInRangeOrMovedOut(from, room, visible, audible)
-  const contents = Array.from(room.contents.values())
-  pushContentsInRangeOrMovedOut(contents, from, visible, audible)
-
+function pushContentsInfo(contents: Content[], from: ParticipantStore){
   //  Find contentsInfo updated.
   const contentsInfoToSend = contents.filter(c => {
     const sent = from.contentsInfoSent.get(c)
@@ -192,6 +182,20 @@ messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
     from.pushOrUpdateMessage(msgToSend)
     //  console.log(`Contents info ${contentsInfoToSend.map(c=>c.id)} sent.`)
   }
+}
+
+messageHandlers.set(MessageType.REQUEST_RANGE, (msg, from, room) => {
+  room.tick ++;
+  const ranges = JSON.parse(msg.v) as number[][]
+  const visible = ranges[0]
+  const audible = ranges[1]
+
+  pushParticipantsInRangeOrMovedOut(from, room, visible, audible)
+  pushMousesInRangeOrMovedOut(from, room, visible, audible)
+
+  const contents = Array.from(room.contents.values())
+  pushContentsInRangeOrMovedOut(contents, from, visible, audible)
+  pushContentsInfo(contents, from)
 
   from.sendMessages()
 })
@@ -287,26 +291,44 @@ messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, from, room) => {
   //  console.log(`Contents update ${cs.map(c=>c.id)} at ${time}`)
 })
 
-messageHandlers.set(MessageType.CONTENT_REMOVE_REQUEST, (msg, _participant, room) => {
+messageHandlers.set(MessageType.CONTENT_REMOVE_REQUEST, (msg, from, room) => {
   const cids = JSON.parse(msg.v) as string[]
   //   delete contents
-  const contents:Content[] = []
+  const toRemove:Content[] = []
   for(const cid of cids){
     const c = room.contents.get(cid)
     if (c){
-      contents.push(c)
+      toRemove.push(c)
       room.contents.delete(cid)
     }
   }
   //  forward remove request to all remote participants
-  const remotes = Array.from(room.participants.values()).filter(participant => participant.id !== msg.p)
-  remotes.forEach(remote => {
-    for(const c of contents){
-      remote.contentsSent.delete(c)
-      remote.contentsInfoSent.delete(c)
+  for(const participant of room.participants){
+    //  remove content from contentsSent of all participants.
+    for(const c of toRemove){
+      participant.contentsSent.delete(c)
+      participant.contentsInfoSent.delete(c)
     }
-    remote.pushOrUpdateMessage(msg)    
-  })
+    //  remove content from CONTENT_INFO_UPDATE and CONTENT_UPDATE_REQUEST
+    const msgs:Message[] = []
+    const msgInfo = participant.messagesTo.find(m => m.t === MessageType.CONTENT_INFO_UPDATE)
+    if (msgInfo){ msgs.push(msgInfo)}
+    const msgContent = participant.messagesTo.find(m => m.t === MessageType.CONTENT_UPDATE_REQUEST)
+    if (msgContent){ msgs.push(msgContent)}
+    for (const msg of msgs){
+      const value = JSON.parse(msg.v) as {id:string}[]
+      for(const remove of toRemove){
+        const idx = value.findIndex(c => c.id === remove.content.id)
+        if (idx >= 0){
+          value.splice(idx, 1)
+        }
+      }
+    }
+    //  forward remove message (need to remove ContentInfoList)
+    if (participant !== from){
+      participant.pushOrUpdateMessage(msg)    
+    }
+  }
 })
 
 async function handleWs(sock: WebSocket) {
