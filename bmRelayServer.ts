@@ -263,7 +263,7 @@ messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
     if (participant && !participant.socket.isClosed){
       participant.socket.close(1000, 'closed by PARTICIPANT_LEFT message.')
       room.onParticipantLeft(participant)
-      //console.log(`participant ${msg.p} left. ${room.participants.length} remain.`)
+      console.log(`participant ${msg.p} left. ${room.participants.length} remain.`)
     }else{
       //  console.error(`PARTICIPANT_LEFT can not find pid=${msg.p}`)
     }  

@@ -189,6 +189,7 @@ export class RoomStore {
 
   constructor(roomId: string){
     this.id = roomId
+    console.log(`Room ${this.id} created.`)
   }
 
   getParticipant(pid: string, sock: WebSocket){
@@ -210,6 +211,7 @@ export class RoomStore {
       this.contents.forEach(c => {
         if (!isContentWallpaper(c.content)){ this.contents.delete(c.content.id) }
       })
+      console.log(`Room ${this.id} closed.`)
     }
   }
 }
