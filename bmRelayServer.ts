@@ -268,7 +268,7 @@ messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
       //console.log(`states: ${JSON.stringify(Array.from(participant.participantStates.values()))}`)
       const infoMsg = participant.storedMessages.get(MessageType.PARTICIPANT_INFO)
       const name = infoMsg ? JSON.parse(infoMsg.v).name : ''
-      console.log(`Participant ${pid}:"${name}" left. ${room.participants.length} remain.`)
+      console.log(`Participant ${pid}:"${name}" left. ${room.participants.length} remain in "${room.id}".`)
     }else{
       //  console.error(`PARTICIPANT_LEFT can not find pid=${pid}`)
     }  
