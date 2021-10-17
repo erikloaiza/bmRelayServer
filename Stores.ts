@@ -69,6 +69,7 @@ export interface ParticipantState{
 export class ParticipantStore {
   id: string
   socket:WebSocket
+  lastReceiveTime: number   //  Timestamp to detect connection lost
   //  participant related
   onStage = false
   storedMessages = new Map<string, Message>()   //  key=type
@@ -76,7 +77,7 @@ export class ParticipantStore {
   timeSentStates = new Map<string, number>()
   messagesTo:Message[] = []                     //
 
-  //  participant related
+  //  participant pose
   pose?: Pose2DMap
   participantsSent:Map<ParticipantStore, ParticipantSent> = new Map()
 
@@ -175,6 +176,7 @@ export class ParticipantStore {
   constructor(id:string, socket:WebSocket){
     this.id = id
     this.socket = socket
+    this.lastReceiveTime = Date.now()
   }
 }
   
