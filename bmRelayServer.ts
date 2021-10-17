@@ -338,24 +338,17 @@ messageHandlers.set(MessageType.CONTENT_REMOVE_REQUEST, (msg, from, room) => {
 
 const CONNECTION_CHECK_INTERVAL = 30 * 1000   //  Check lastRecieveTime every 30 seconds.
 const CONNECTION_TIMEOUT = 3 * 60 * 1000      //  Timeout in 3 minutes.
-const PING_THRESHOLD_TIME = 60 * 1000         //  Send ping if no packet received in last PING_THRESHOLD_TIME.
 
 setInterval(()=>{
   const now = Date.now()
   for(const room of rooms.rooms.values()){
-    const candidates = room.participants.filter(p => p.lastReceiveTime + PING_THRESHOLD_TIME < now)
-    for(const p of candidates){
-      if (p.lastReceiveTime + CONNECTION_TIMEOUT < now){  //  connection lost
-        const msg = p.storedMessages.get(MessageType.PARTICIPANT_INFO)
-        const name = msg ? JSON.parse(msg.v)?.name : undefined
-        console.log(`Participant ${p.id}:${name ? `"${name}"` : 'undefined'} left by connection lost detected by server.`)
-        room.onParticipantLeft(p)
-      }else{
-        console.log(`Ping sent to participant ${p.id}.`)
-        p.socket.ping().catch((reason)=>{
-          console.log(`Ping to ${p.id} is rejected by reason:${reason}.`)
-        }) //  send ping
-      }
+    const timeouts = room.participants.filter(p => p.lastReceiveTime + CONNECTION_TIMEOUT < now)
+    for(const p of timeouts){
+      const msg = p.storedMessages.get(MessageType.PARTICIPANT_INFO)
+      const name = msg ? JSON.parse(msg.v)?.name : undefined
+      console.log(`Participant ${p.id}:${name ? `"${name}"` : 'undefined'} left by connection lost detected by server. ${room.participants.length} remain in "${room.id}".`)
+      p.socket.close(1002, `Closed by server. No packet during ${CONNECTION_TIMEOUT/1000} sec.`)
+      room.onParticipantLeft(p)
     }
   }
 }, CONNECTION_CHECK_INTERVAL)
@@ -403,10 +396,6 @@ async function handleWs(sock: WebSocket) {
         const [, body] = ev;
         // ping.
         console.log("ws:Ping", body);
-        const rp = rooms.sockMap.get(sock)
-        if (rp){
-          rp.participant.lastReceiveTime = Date.now()
-        }
       } else if (isWebSocketCloseEvent(ev)) {
         // onclose: close websocket
         const { code, reason } = ev;
