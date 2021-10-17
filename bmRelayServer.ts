@@ -336,6 +336,7 @@ messageHandlers.set(MessageType.CONTENT_REMOVE_REQUEST, (msg, from, room) => {
   }
 })
 
+/*
 const CONNECTION_CHECK_INTERVAL = 30 * 1000   //  Check lastRecieveTime every 30 seconds.
 const CONNECTION_TIMEOUT = 3 * 60 * 1000      //  Timeout in 3 minutes.
 
@@ -352,6 +353,7 @@ setInterval(()=>{
     }
   }
 }, CONNECTION_CHECK_INTERVAL)
+*/
 
 async function handleWs(sock: WebSocket) {
   try {
