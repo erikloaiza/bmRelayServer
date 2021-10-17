@@ -352,7 +352,9 @@ setInterval(()=>{
         room.onParticipantLeft(p)
       }else{
         console.log(`Ping sent to participant ${p.id}.`)
-        p.socket.ping() //  send ping
+        p.socket.ping().catch((reason)=>{
+          console.log(`Ping to ${p.id} is rejected by reason:${reason}.`)
+        }) //  send ping
       }
     }
   }
