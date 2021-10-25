@@ -262,7 +262,9 @@ messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
   for(const pid of pids){
     const participant = room.participantsMap.get(pid)
     if (participant && !participant.socket.isClosed){
-      participant.socket.close(1000, 'closed by PARTICIPANT_LEFT message.')
+      participant.socket.close(1000, 'closed by PARTICIPANT_LEFT message.').catch(reason => {
+        console.error(`participant.socket.close(1000) failed by reason=${reason}`)
+      })
       room.onParticipantLeft(participant)
 
       //console.log(`states: ${JSON.stringify(Array.from(participant.participantStates.values()))}`)

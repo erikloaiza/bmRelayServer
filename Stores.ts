@@ -133,7 +133,9 @@ export class ParticipantStore {
   sendMessages(){ //  Client wait response of the server. Server must always send packet.
     try{
       if (!this.socket.isClosed){
-        this.socket.send(JSON.stringify(this.messagesTo))
+        this.socket.send(JSON.stringify(this.messagesTo)).catch(reason => {
+          console.error(`this.socket.send() failed by reason=${reason}`)
+        })
       }
     }
     catch(e){
