@@ -338,7 +338,6 @@ messageHandlers.set(MessageType.CONTENT_REMOVE_REQUEST, (msg, from, room) => {
   }
 })
 
-/*
 const CONNECTION_CHECK_INTERVAL = 30 * 1000   //  Check lastRecieveTime every 30 seconds.
 const CONNECTION_TIMEOUT = 3 * 60 * 1000      //  Timeout in 3 minutes.
 
@@ -350,12 +349,13 @@ setInterval(()=>{
       const msg = p.storedMessages.get(MessageType.PARTICIPANT_INFO)
       const name = msg ? JSON.parse(msg.v)?.name : undefined
       console.log(`Participant ${p.id}:${name ? `"${name}"` : 'undefined'} left by connection lost detected by server. ${room.participants.length} remain in "${room.id}".`)
-      p.socket.close(1002, `Closed by server. No packet during ${CONNECTION_TIMEOUT/1000} sec.`)
+      p.socket.close(1002, `Closed by server. No packet during ${CONNECTION_TIMEOUT/1000} sec.`).catch(reason => {
+        console.error(`Failed to close socket by timeout for ${p.id} reason:${reason}.`)
+      })
       room.onParticipantLeft(p)
     }
   }
 }, CONNECTION_CHECK_INTERVAL)
-*/
 
 async function handleWs(sock: WebSocket) {
   try {
