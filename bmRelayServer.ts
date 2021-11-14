@@ -1,5 +1,5 @@
-import {serve} from "https://deno.land/std/http/server.ts"
-import {serveTLS} from "https://deno.land/std/http/server.ts"
+import {serve} from "https://deno.land/std@0.102.0/http/server.ts"
+import {serveTLS} from "https://deno.land/std@0.102.0/http/server.ts"
 import {acceptWebSocket, isWebSocketCloseEvent, isWebSocketPingEvent, WebSocket} from "https://deno.land/std/ws/mod.ts"
 
 import {BMMessage as Message} from './BMMessage.ts'
