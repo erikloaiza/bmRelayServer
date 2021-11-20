@@ -1,6 +1,6 @@
-import {serve} from "https://deno.land/std@0.102.0/http/server.ts"
-import {serveTLS} from "https://deno.land/std@0.102.0/http/server.ts"
-import {acceptWebSocket, isWebSocketCloseEvent, isWebSocketPingEvent, WebSocket} from "https://deno.land/std@0.102.0/ws/mod.ts"
+import {serve} from "https://deno.land/std@0.115.1/http/server_legacy.ts"
+import {serveTLS} from "https://deno.land/std@0.115.1/http/server_legacy.ts"
+import {acceptWebSocket, isWebSocketCloseEvent, isWebSocketPingEvent, WebSocket} from "https://deno.land/std@0.115.1/ws/mod.ts"
 
 import {BMMessage as Message} from './BMMessage.ts'
 import {extractSharedContentInfo, ISharedContent, isEqualSharedContentInfo} from './ISharedContent.ts'

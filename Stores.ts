@@ -2,7 +2,7 @@ import {ISharedContent, SharedContentInfo, isContentWallpaper} from './ISharedCo
 import {Pose2DMap, clonePose2DMap, cloneV2} from './coordinates.ts'
 import {BMMessage as Message, ObjectArrayMessage} from './BMMessage.ts'
 import {MessageType} from './MessageType.ts'
-import {WebSocket} from "https://deno.land/std@0.102.0/ws/mod.ts"
+import {WebSocket} from "https://deno.land/std@0.115.1/ws/mod.ts"
 import {ObjectArrayMessageTypes, StringArrayMessageTypes} from './MessageType.ts'
 
 export interface Content{
