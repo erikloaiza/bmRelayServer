@@ -204,9 +204,17 @@ export class RoomStore {
     this.participants.push(created)
     return created
   }
-  onParticipantLeft(participant: ParticipantStore){
-    this.participantsMap.delete(participant.id)
-    const idx = this.participants.findIndex(p => p === participant)
+  onParticipantLeft(left: ParticipantStore){
+    //  remove screen contents from the participant left.
+    const screens = Array.from(this.contents.values())
+      .filter((c => (c.content.type === 'screen' || c.content.type === 'camera') 
+        && left.id === c.content.id.substr(0, left.id.length)))
+      .map(c => c.content.id)
+    this.removeContents(screens, left)
+
+    //  remove the participant left.
+    this.participantsMap.delete(left.id)
+    const idx = this.participants.findIndex(p => p === left)
     this.participants.splice(idx, 1)
     if (this.participantsMap.size === 0){
       if (this.participants.length){
@@ -216,6 +224,48 @@ export class RoomStore {
         if (!isContentWallpaper(c.content)){ this.contents.delete(c.content.id) }
       })
       console.log(`Room ${this.id} closed.`)
+    }
+  }
+
+  removeContents(cids: string[], from: ParticipantStore){
+    //   delete contents
+    const toRemove:Content[] = []
+    for(const cid of cids){
+      const c = this.contents.get(cid)
+      if (c){
+        toRemove.push(c)
+        this.contents.delete(cid)
+      }
+    }
+    for(const participant of this.participants){
+      //  remove content from contentsSent of all participants.
+      for(const c of toRemove){
+        participant.contentsSent.delete(c)
+        participant.contentsInfoSent.delete(c)
+      }
+      //  remove content from CONTENT_INFO_UPDATE and CONTENT_UPDATE_REQUEST
+      const msgs:Message[] = []
+      const msgInfo = participant.messagesTo.find(m => m.t === MessageType.CONTENT_INFO_UPDATE)
+      if (msgInfo){ msgs.push(msgInfo)}
+      const msgContent = participant.messagesTo.find(m => m.t === MessageType.CONTENT_UPDATE_REQUEST)
+      if (msgContent){ msgs.push(msgContent)}
+      for (const msg of msgs){
+        const value = JSON.parse(msg.v) as {id:string}[]
+        for(const remove of toRemove){
+          const idx = value.findIndex(c => c.id === remove.content.id)
+          if (idx >= 0){
+            value.splice(idx, 1)
+          }
+        }
+      }
+    }
+    //  forward remove request to all remote participants
+    const msg:Message = {t: MessageType.CONTENT_REMOVE_REQUEST, r:this.id, v: JSON.stringify(cids)}
+    for(const participant of this.participants){
+      //  forward remove message (need to remove ContentInfoList)
+      if (participant !== from){
+        participant.pushOrUpdateMessage(msg)
+      }
     }
   }
 }
