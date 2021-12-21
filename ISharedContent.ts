@@ -1,8 +1,9 @@
 import {Pose2DMap} from './coordinates.ts'
 import {MapObject} from './MapObject.ts'
+const MAXIMIZABLE_IMAGE_MIN_WIDTH = 200
 
 export type ContentType = 'img' | 'text' | 'pdf' | 'youtube' | 'iframe' | 'screen' | 'camera' |
-  'gdrive' | 'whiteboard' | ''
+  'gdrive' | 'whiteboard' | 'playbackScreen' | 'playbackCamera' |  ''
 
 export interface SharedContentInfoData {
   name: string                    //  name or title of the content.
@@ -27,6 +28,8 @@ export function extractSharedContentInfo(c: SharedContentInfo){
   return rv
 }
 
+export type ZoneType = 'open' | 'close'
+
 export interface SharedContentData extends SharedContentInfoData {
   zorder: number                  //  unix timestamp when shared or moved to top.
   url: string                     //  url or text to share
@@ -36,6 +39,8 @@ export interface SharedContentData extends SharedContentInfoData {
   pinned: boolean                 //  pinned (not resizable or resizable)
   noFrame?: boolean               //  no (invisible) frame
   opacity?: number                //  opacity
+  zone?: ZoneType                 //  is this a audio zone is the zone closed or open?
+  playback?: boolean              //  is playback or normal content
 }
 
 export interface ISharedContent extends MapObject, SharedContentData, SharedContentId {
@@ -57,6 +62,12 @@ export function canContentBeAWallpaper(c?: ISharedContent){
 export function isContentEditable(c?: ISharedContent) {
   return c && (c.type === 'text' || c.type === 'iframe' || c.type === 'pdf' ||
     c.type === 'whiteboard' || c.type === 'gdrive' || c.type === 'youtube')
+}
+//  maximizable or not
+export function isContentMaximizable(c?: ISharedContent) {
+  return c && (c.type === 'iframe' || c.type === 'pdf' || c.type === 'whiteboard' ||
+    c.type === 'gdrive' || c.type === 'youtube' || c.type === 'screen' || c.type === 'camera'
+    ||  (c.type === 'img' && c.size[0] > MAXIMIZABLE_IMAGE_MIN_WIDTH))
 }
 //  wallpaper or not
 export function isContentWallpaper(c?: ISharedContent) {
