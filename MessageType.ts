@@ -2,6 +2,7 @@
 export const ParticipantMessageType = {
   PARTICIPANT_AFK: 'p_afk',                     //  boolean
   PARTICIPANT_TRACKSTATES: 'p_trackSt',         //  TrackStates
+  PARTICIPANT_VIEWPOINT: 'p_viewpoint',         //  Viewpoint
 }
 export type ParticipantMessageKeys = keyof typeof ParticipantMessageType
 
@@ -9,7 +10,6 @@ export const PoseMessageType = {
   PARTICIPANT_POSE: 'mp',                       //  special text, -> presence and message
   PARTICIPANT_MOUSE: 'mm',                      //  special text, -> presence and message
   PARTICIPANT_ON_STAGE: 'p_onStage',            //  boolean
-  PARTICIPANT_VIEWPOINT: 'p_viewpoint',         //  Viewpoint
 }
 
 export const StoredMessageType = {
