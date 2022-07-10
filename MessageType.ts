@@ -15,6 +15,7 @@ export const PoseMessageType = {
 export const StoredMessageType = {
   ...ParticipantMessageType,
   PARTICIPANT_INFO: 'p_info',                   //  RemoteInformation, -> presence
+  PARTICIPANT_VRMRIG: 'p_vrm',
   MAIN_SCREEN_CARRIER: 'main_screen_carrier',   //  {carrierId, enabled} -> presence
   MY_CONTENT: 'my_content',                     //  ISharedContent[] -> presence, used only when no bmRelayServer exist
 }
