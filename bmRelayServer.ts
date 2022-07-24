@@ -83,8 +83,10 @@ messageHandlers.set(MessageType.REQUEST_ALL, (_msg, from, room) => {
 
 function pushParticipantsInRangeOrMovedOut(from:ParticipantStore, room:RoomStore, visible:number[], audible:number[]){
   //  Push participants updated and in the range.
-  const overlaps = room.participants.filter(p => p.onStage 
-    || (p.pose && (isInRect(p.pose.position, visible) || isInCircle(p.pose.position, audible))))
+  const overlaps = room.participants.filter(p => p.id !== from.id && (p.onStage
+    || (p.pose && (isInRect(p.pose.position, visible) || isInCircle(p.pose.position, audible)))
+    )
+  )
   for (const p of overlaps) { from.pushStatesToSend(p) }
 
   //  Push participants, who was in the range but moved out later.
@@ -99,12 +101,12 @@ function pushParticipantsInRangeOrMovedOut(from:ParticipantStore, room:RoomStore
       }
     }
   })
-  from.pushOrUpdateMessage({t:MessageType.PARTICIPANT_OUT, v:JSON.stringify(pidsOut)})
+  if (pidsOut.length) from.pushOrUpdateMessage({t:MessageType.PARTICIPANT_OUT, v:JSON.stringify(pidsOut)})
 }
 
 function pushMousesInRangeOrMovedOut(from:ParticipantStore, room:RoomStore, visible:number[], audible:number[]){
   //  Push participants updated and in the range.
-  const overlaps = room.participants.filter(p => 
+  const overlaps = room.participants.filter(p => p.id !== from.id && 
     p.mousePos && (isInRect(p.mousePos, visible) || isInCircle(p.mousePos, audible)))
   for (const p of overlaps) { from.pushMouseToSend(p) }
 
@@ -119,7 +121,7 @@ function pushMousesInRangeOrMovedOut(from:ParticipantStore, room:RoomStore, visi
       }
     }
   })
-  from.pushOrUpdateMessage({t:MessageType.MOUSE_OUT, v:JSON.stringify(pidsOut)})
+  if (pidsOut.length) from.pushOrUpdateMessage({t:MessageType.MOUSE_OUT, v:JSON.stringify(pidsOut)})
 }
 
 
@@ -275,6 +277,10 @@ messageHandlers.set(MessageType.PARTICIPANT_LEFT, (msg, from, room) => {
       //  console.error(`PARTICIPANT_LEFT can not find pid=${pid}`)
     }  
   }
+  for(const participant of room.participants){
+    const msgToSend = {t:MessageType.PARTICIPANT_LEFT, v:JSON.stringify(pids)}
+    participant.pushOrUpdateMessage(msgToSend)
+  }
 })
 
 messageHandlers.set(MessageType.CONTENT_UPDATE_REQUEST, (msg, from, room) => {
@@ -342,6 +348,7 @@ async function handleWs(sock: WebSocket) {
             room = rooms.get(msg.r)
             participant = room.getParticipant(msg.p, sock)
             rooms.sockMap.set(sock, {room, participant})
+            console.log(`Participant ${participant.id} joined. ${room.participants.length} people in "${room.id}".`)
           }else{
             const rp = rooms.sockMap.get(sock)!
             room = rp.room

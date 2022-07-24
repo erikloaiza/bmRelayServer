@@ -165,6 +165,7 @@ export class ParticipantStore {
     if (p.mousePos && p.mouseMessageValue){
       if (!sent){ sent = this.mousesSent.get(p) }
       if (sent){
+        if (p.mouseUpdateTime <= sent.timeSent) return
         sent.timeSent = p.mouseUpdateTime
         sent.position = cloneV2(p.mousePos)
       }else{
