@@ -184,7 +184,9 @@ export class ParticipantStore {
 }
   
 export class RoomStore {
-  id: string                                //  room id
+  id: string //  room id
+  isPrivate: boolean
+  password: string | undefined                               
   tick = 1
   participantsMap = new Map<string, ParticipantStore>()  //  key=source pid
   participants:ParticipantStore[] = []
@@ -192,8 +194,10 @@ export class RoomStore {
   contents = new Map<string, Content>()     //  room contents
 
 
-  constructor(roomId: string){
+  constructor(roomId: string, isPrivate?:boolean, password?:string){
     this.id = roomId
+    this.isPrivate = !!isPrivate
+    this.password = password
     console.log(`Room ${this.id} created.`)
   }
 
@@ -279,12 +283,12 @@ export class Rooms{
   rooms = new Map<string, RoomStore>()
   sockMap = new Map<WebSocket, PandR>()
   sendCount = 0;
-  get(name: string){
+  get(name: string, isPrivate?:boolean, password?:string){
     const found = this.rooms.get(name)
     if (found){
       return found
     }
-    const create = new RoomStore(name)
+    const create = new RoomStore(name, isPrivate, password)
     this.rooms.set(name, create)
     return create
   }

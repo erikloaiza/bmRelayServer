@@ -10,6 +10,11 @@ import {getRect, isOverlapped, isOverlappedToCircle, isInRect, isInCircle, str2M
 
 import {Content, messageHandlers, rooms, RoomStore, ParticipantStore, createContentSent, updateContentSent} from './Stores.ts'
 
+
+//auth dependencies
+import { GoogleOAuth2 } from "https://deno.land/x/google/oauth2.ts";
+
+
 function instantMessageHandler(msg: Message, from:ParticipantStore, room: RoomStore){
   //  send message to destination or all remotes
   //  console.log(`instantMessageHandler ${msg.t}`, msg)
@@ -328,7 +333,10 @@ setInterval(()=>{
   }
 }, CONNECTION_CHECK_INTERVAL)
 
-async function handleWs(sock: WebSocket) {
+type AuthType = 'google'|'anonymous'|'basic'
+
+
+async function handleWs(sock: WebSocket, authParams:{auth: string, authType:AuthType, pass?:string}) {
   try {
     for await (const ev of sock) {
       if (typeof ev === "string") {
@@ -340,12 +348,18 @@ async function handleWs(sock: WebSocket) {
             console.error(`Invalid message: ${ev}`)
           }
 
-          //  prepare participant and room
-          let participant:ParticipantStore
-          let room:RoomStore
           if (msg.r && msg.p){
             //  create room and participant
-            room = rooms.get(msg.r)
+            let isAuth = false         
+            if(authParams.authType!='anonymous')
+              isAuth = await validateAuth(authParams.auth,authParams.authType)
+
+            //TODO: if we want anonymous users to authenticate only with password, register the option
+            room = rooms.get(msg.r,!!msg.rp, msg.rp)  
+            console.log({room}) 
+
+            if(room.isPrivate && !isAuth && room.password !== msg.rp) throw new Error("Invalid password");
+
             participant = room.getParticipant(msg.p, sock)
             rooms.sockMap.set(sock, {room, participant})
             console.log(`Participant ${participant.id} joined. ${room.participants.length} people in "${room.id}".`)
@@ -401,6 +415,36 @@ async function handleWs(sock: WebSocket) {
   }
 }
 
+
+//TODO: replace keys with secrets
+const ga = new GoogleOAuth2({
+  client_id: "858773398697-vki2lito392c5dlss9s31ap077nn0qbd.apps.googleusercontent.com",
+  client_secret: "AIzaSyAADCXxUujmh0VqXIzJofwl03MA5O8v8EQ",
+  redirect_uri: "http://example.com/redirect_uri",
+  "scopes": [
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/drive.readonly",
+  ],
+});
+
+async function validateAuth(auth: string, authType:AuthType){
+  try {
+    if(authType === 'google'){
+      const data = ga.decodeIdToken(auth);
+      return !!data
+    }
+    //TODO: only testing, remove
+    else if (authType ==='basic') return true
+    else{
+      console.log("The only auth strategy implemented is google, please implement more if required");
+      return false
+    }
+  } catch (error) {
+    return false
+  }
+
+}
+
 if (import.meta.main) {
   /** websocket message relay server */
   
@@ -418,14 +462,31 @@ if (import.meta.main) {
     TLS ? serveTLS({port:Number(port), certFile:'./host.crt', keyFile:'./host.key'}) 
       : serve(`:${port}`)
     )) {
-    const { conn, r: bufReader, w: bufWriter, headers } = req;
+
+    let authKey: string | undefined;
+    if(!req.url.match(/auth/)){
+      authKey = (req.headers.get('authorization') || '').split(' ')[1]
+    }
+
+    const { conn, r: bufReader, w: bufWriter, headers, url } = req;
+    const params = new URLSearchParams(url.replace('/',''))
+
+    if(authKey){
+      const user = ga.decodeIdToken(authKey)
+      console.log(user)
+      params.append('authData', JSON.stringify(user))
+    }
+
+    const pass = params.get('roomPassword') || undefined
+    const auth = params.get('authData') || ''
+    const authType = params.get('authorizationType') as AuthType || 'anonymous'
     acceptWebSocket({
       conn,
       bufReader,
       bufWriter,
       headers,
     })
-      .then(handleWs)
+      .then((s)=>handleWs(s,{auth,authType, pass}))
       .catch(async (err) => {
         console.error(`failed to accept websocket: ${err}`);
         await req.respond({ status: 400 });
